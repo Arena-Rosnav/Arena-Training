@@ -1,0 +1,76 @@
+[tool.uv]
+package = true
+
+[project]
+name = "arena-training"
+version = "0.1.0"
+description = "Deep Reinforcement Learning training pipeline for Arena-Rosnav"
+authors = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
+maintainers = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
+requires-python = "==3.10.*"
+dependencies = [
+    # Core Python dependencies
+    "numpy>=1.25.4,<2.0.0",
+    "pyyaml>=6.0,<7.0",
+    
+    # Deep Learning & RL
+    "torch>=2.0.0,<3.0.0",
+    "stable-baselines3>=2.1.0,<3.0.0",
+    "sb3-contrib>=2.1.0,<3.0.0",
+    "gymnasium>=1.0.0,<2.0.0",
+    
+    # Training & Monitoring
+    "wandb>=0.13.9,<1.0.0",
+    
+    # Scientific Computing
+    "scipy>=1.10.0,<2.0.0",
+    
+    # Utilities
+    "pydantic>=2.10.6,<3.0.0",
+    "ruamel-yaml>=0.17,<1.0",
+    "pygments>=2.18.0,<3.0.0",
+    
+    # ROS 2 dependencies (provided by colcon workspace)
+    # - rclpy
+    # - geometry_msgs, nav_msgs, sensor_msgs, std_msgs
+    # - ament_index_python
+    
+    # Local dependencies (provided by workspace)
+    "rosnav-rl @ ../../deps/rosnav-rl/rosnav_rl"
+]
+
+# Sub-packages (Python subpackages within arena_training)
+# These are subpackages of arena_training, not separate ROS 2 packages:
+# - arena_training.arena_rosnav_rl: Training utilities and RL components
+# - arena_training.environments: Gymnasium environments for simulation
+# - rosnav_rl: Core RL framework (separate ROS 2 package in src/deps/rosnav-rl/)
+
+[project.optional-dependencies]
+dev = [
+    "pyinstrument>=5.0.3,<6.0.0",
+    "pytest>=7.0.0,<8.0.0",
+]
+
+# Build configuration
+# arena_training is a ROS 2 Python package with two subpackages:
+# 1. arena_training.arena_rosnav_rl - Training utilities and trainers
+# 2. arena_training.environments - Gymnasium environments
+#
+# External dependency: rosnav-rl (separate ROS 2 package in ../../deps/rosnav-rl/)
+# Required workspace packages: arena_rclpy_mixins, task_generator, crowdsim_agents
+#
+# Build: colcon build --packages-select arena_training
+# Install Python deps: pip install -e . (for development)
+
+[build-system]
+requires = ["setuptools<80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = []
+select = ["E", "F"]
+mccabe = { max-complexity = 10 }
+per-file-ignores = {}
