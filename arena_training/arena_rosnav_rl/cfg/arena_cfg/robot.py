@@ -1,7 +1,9 @@
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
-from ...tools.general import get_robot_yaml_path, load_yaml
+
+# from ...tools.general import get_robot_yaml_path, load_yaml
+import arena_robots.Robot
 
 
 class DiscreteAction(BaseModel):
@@ -41,7 +43,7 @@ class RobotCfg(BaseModel):
     robot_description: Optional[RobotYamlCfg] = Field(
         alias="Robot Yaml Description",
         default_factory=lambda: RobotYamlCfg.model_validate(
-            load_yaml(get_robot_yaml_path())
+            arena_robots.Robot.RobotIdentifier("jackal").resolve_sync().model_params
         ),
     )
     attach_full_range_laser: Optional[bool] = True

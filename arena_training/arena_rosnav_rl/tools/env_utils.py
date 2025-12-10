@@ -1,6 +1,6 @@
 from typing import Any, Callable, List, Tuple, Type, Union
 
-import gym
+import gymnasium as gym
 import rclpy
 import rosnav_rl
 from rosnav_rl.utils.rostopic import Namespace

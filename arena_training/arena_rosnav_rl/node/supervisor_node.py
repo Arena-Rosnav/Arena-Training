@@ -42,7 +42,7 @@ class SupervisorNode(Node):
         """Continuously spins the ROS2 node in a background thread with MultiThreadedExecutor."""
         while not self._shutdown_event.is_set():
             # Use the executor to handle all callback groups
-            self._executor.spin_once(timeout_sec=0.1)
+            self._executor.spin_once(timeout_sec=0.01)
 
     def destroy_node(self):
         self.stop_spinning()

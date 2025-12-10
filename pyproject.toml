@@ -36,14 +36,8 @@ dependencies = [
     # - ament_index_python
     
     # Local dependencies (provided by workspace)
-    "rosnav-rl @ ../../deps/rosnav-rl/rosnav_rl"
+    "rosnav-rl @ ./deps/rosnav_rl/rosnav_rl"
 ]
-
-# Sub-packages (Python subpackages within arena_training)
-# These are subpackages of arena_training, not separate ROS 2 packages:
-# - arena_training.arena_rosnav_rl: Training utilities and RL components
-# - arena_training.environments: Gymnasium environments for simulation
-# - rosnav_rl: Core RL framework (separate ROS 2 package in src/deps/rosnav-rl/)
 
 [project.optional-dependencies]
 dev = [
@@ -51,16 +45,6 @@ dev = [
     "pytest>=7.0.0,<8.0.0",
 ]
 
-# Build configuration
-# arena_training is a ROS 2 Python package with two subpackages:
-# 1. arena_training.arena_rosnav_rl - Training utilities and trainers
-# 2. arena_training.environments - Gymnasium environments
-#
-# External dependency: rosnav-rl (separate ROS 2 package in ../../deps/rosnav-rl/)
-# Required workspace packages: arena_rclpy_mixins, task_generator, crowdsim_agents
-#
-# Build: colcon build --packages-select arena_training
-# Install Python deps: pip install -e . (for development)
 
 [build-system]
 requires = ["setuptools<80", "wheel"]

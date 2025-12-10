@@ -24,9 +24,12 @@ from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from rosnav_rl_msgs.srv import GetCommand
 from std_srvs.srv import Empty as EmptySrv
 
-from arena_rosnav_rl.node import SupervisorNode
-from arena_rosnav_rl.utils.envs import determine_termination, get_twist_from_action
-from arena_rosnav_rl.utils.type_alias.observation import InformationDict
+from arena_training.arena_rosnav_rl.node import SupervisorNode
+from arena_training.arena_rosnav_rl.utils.envs import (
+    determine_termination,
+    get_twist_from_action,
+)
+from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
 from rosnav_rl.utils.logging import flush_errors_decorator
 
