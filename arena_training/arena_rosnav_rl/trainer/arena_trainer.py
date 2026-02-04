@@ -2,9 +2,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Type
 
-from ..cfg import cfg as arena_cfg
-from ..utils import paths as Paths
+import arena_rosnav_rl.cfg as arena_cfg
 import rosnav_rl
+from rosnav_rl.rl_agent import RL_Agent
+from rosnav_rl.states import SimulationStateContainer
+from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
+
 from ..node import SupervisorNode
 from ..tools.general import (
     print_base_model,
@@ -12,11 +15,9 @@ from ..tools.general import (
     write_config_yaml,
 )
 from ..tools.states import get_arena_states
+from ..utils import paths as Paths
 from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
-from rosnav_rl.rl_agent import RL_Agent
-from rosnav_rl.states import SimulationStateContainer
-from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
 
 
 @dataclass

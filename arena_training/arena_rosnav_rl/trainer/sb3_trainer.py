@@ -4,7 +4,7 @@ from functools import partial
 import rclpy
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from ..cfg import cfg as arena_cfg
+from ..cfg import sb3_cfg as arena_cfg
 from ..utils import paths as Paths
 from ...environments.wrappers import TimeSyncWrapper
 from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
