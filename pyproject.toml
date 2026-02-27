@@ -12,35 +12,30 @@ dependencies = [
     # Core Python dependencies
     "numpy>=1.25.4,<2.0.0",
     "pyyaml>=6.0,<7.0",
-    
     # Deep Learning & RL
     "torch>=2.0.0,<3.0.0",
     "stable-baselines3>=2.1.0,<3.0.0",
     "sb3-contrib>=2.1.0,<3.0.0",
     "gymnasium>=1.0.0,<2.0.0",
-    
     # Training & Monitoring
     "wandb>=0.13.9,<1.0.0",
-    
     # Scientific Computing
     "scipy>=1.10.0,<2.0.0",
-    
     # Utilities
     "pydantic>=2.10.6,<3.0.0",
     "ruamel-yaml>=0.17,<1.0",
     "pygments>=2.18.0,<3.0.0",
-
-    "rosnav-rl",  # Include local dependency in dev too
+    "rosnav-rl", # Include local dependency in dev too
+    "pyinstrument>=5.1.2",
 ]
 
 # Fixed local dependency using [tool.uv.sources]
 [tool.uv.sources]
-rosnav-rl = { path = "./deps/rosnav_rl/rosnav_rl" }
+rosnav-rl = { path = "./deps/rosnav_rl/rosnav_rl", editable = true }
 
 # Convert project.optional-dependencies to uv dependency-groups
 [dependency-groups]
 dev = [
-    "pyinstrument>=5.0.3,<6.0.0",
     "pytest>=7.0.0,<8.0.0",
 ]
 
