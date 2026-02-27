@@ -57,5 +57,5 @@ def get_twist_from_action(action: np.ndarray) -> Twist:
     twist = Twist()
     twist.linear.x = float(action[0])
     twist.linear.y = float(action[1])
-    twist.linear.z = float(action[2])
+    twist.angular.z = float(action[2])
     return twist

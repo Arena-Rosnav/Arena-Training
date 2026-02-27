@@ -238,8 +238,6 @@ def make_envs(
 
     def create_env_fnc(
         ns: Union[str, Namespace],
-        max_steps: int,
-        init_env_by_call: bool,
     ) -> callable:
         return _test_init_env_fnc(
             node=node,
@@ -258,14 +256,10 @@ def make_envs(
     def create_env_fncs(
         n_envs: int,
         ns_fn: Callable,
-        max_steps: int,
-        init_env_by_call: bool,  # Changed from callable
     ) -> List[Callable]:
         return [
             create_env_fnc(
                 ns=ns_fn(idx),
-                max_steps=max_steps,
-                init_env_by_call=init_env_by_call,
             )
             for idx in range(n_envs)
         ]
@@ -273,6 +267,4 @@ def make_envs(
     return create_env_fncs(
         n_envs=n_envs,
         ns_fn=namespace_fn,
-        max_steps=max_steps,
-        init_env_by_call=init_env_by_call,
     )

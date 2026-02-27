@@ -17,8 +17,20 @@ def _worker(
 ) -> None:
     # Import here to avoid a circular import
     from stable_baselines3.common.env_util import is_wrapped
+    import rclpy
 
     parent_remote.close()
+
+    # Each worker process needs its own ROS2 context.
+    # With forkserver/spawn the context is not yet initialized; with fork it
+    # would be stale, so we shut it down first and reinitialize cleanly.
+    try:
+        if rclpy.ok():
+            rclpy.shutdown()
+    except Exception:
+        pass
+    rclpy.init()
+
     env = _patch_env(env_fn_wrapper.var())
     reset_info: Optional[Dict[str, Any]] = {}
     while True:
