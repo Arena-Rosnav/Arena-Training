@@ -8,11 +8,6 @@ import rclpy
 import yaml
 from geometry_msgs.msg import Twist
 
-# from rosnav_rl.observations import (
-#     DoneObservation,
-#     ObservationCollectorUnit,
-#     ObservationManager,
-#     get_required_observation_units,
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
 )
@@ -21,7 +16,6 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.states import SimulationStateContainer
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
-from rosnav_rl_msgs.srv import GetCommand
 from std_srvs.srv import Empty as EmptySrv
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
@@ -38,16 +32,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     """Abstract base class for Arena reinforcement learning environments.
 
     This class provides a foundational structure for creating Gymnasium-compliant
-    environments that interact with a ROS2-based simulation. It manages the
-    synchronization between the agent's actions and the simulation's command
-    requests, handles observation collection, reward computation, and episode
-    management.
+    environments that interact with a ROS2-based simulation.  It handles
+    observation collection, reward computation, and episode management.
 
-    The core synchronization mechanism relies on a ROS2 service. The simulation
-    requests a command, which blocks the service call. The `step()` method,
-    running in a separate thread (e.g., the main RL training loop), waits for
-    this request, provides the agent's action as a response, and then proceeds
-    with its own logic.
+    In **train_mode** (default) the environment publishes velocity commands
+    directly to the ``cmd_vel`` topic, completely bypassing the nav2
+    controller_server.  This decouples the RL training loop from the nav2
+    planning/control pipeline so that planner failures, ``follow_path``
+    aborts, or bt_navigator restarts never stall training.
 
     Attributes:
         node (SupervisorNode): The ROS2 node used for communication.
@@ -116,30 +108,35 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._max_steps_per_episode = max_steps_per_episode
         self.__is_first_step = True
 
-        # Synchronization mechanism for step() and ROS service callback
-        self._action_condition = threading.Condition()
-        self._pending_action: Optional[np.ndarray] = None
-        self._action_is_available = False  # True when step() provides an action
-        self._action_is_consumed = True  # True when service consumes the action
+        # ROS interfaces (initialised in _initialize_environment)
+        self._reset_task_srv = None
+        self._cmd_vel_pub = None
+        self._initialized = False
 
         if not init_by_call:
             self._initialize_environment()
 
     def _initialize_environment(self):
         """Initializes ROS-dependent components and the observation manager."""
+        if self._initialized:
+            return  # Already initialized
+
         if self.node is None:
             # rclpy.init()  # Initialize ROS in worker process
             env_node_name = f"{self.ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
+            self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
+            self.node.start_spinning()
 
         if self.is_train_mode:
             self._setup_ros_services()
 
         self._setup_observation_manager()
+        self._initialized = True
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
-        task_srv_name = self.ns.simulation_ns("reset_task").to_string()
+        task_srv_name = (self.ns[0] / self.ns[1] / "reset_task").to_string()
         self._reset_task_srv = self.node.create_client(
             EmptySrv,
             task_srv_name,
@@ -151,24 +148,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 f"Service '{task_srv_name}' not available after 3 seconds."
             )
 
-        self._setup_action_service()
-
-    def _setup_action_service(self):
-        service_name = self.ns("get_command").to_string()
-        self.node.get_logger().info(f"Creating get_command service at: {service_name}")
-        self._get_command_srv = self.node.create_service(
-            GetCommand,
-            service_name,
-            self._on_get_command_request,
-            callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
+        # Direct cmd_vel publisher — the sole source of velocity commands
+        # during training.  Completely bypasses the nav2 controller_server.
+        cmd_vel_topic = self.ns("cmd_vel").to_string()
+        self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
+        self.node.get_logger().info(
+            f"Created direct cmd_vel publisher at: {cmd_vel_topic}"
         )
-        self.node.get_logger().info(f"Service {service_name} created successfully!")
 
     def _setup_observation_manager(self):
         """Configures and initializes the ObservationManager."""
         # TODO: Implement observation manager setup
         with open(
-            "/home/le/arena4_ws_exp/src/planners/rosnav_rl/rosnav_rl/rosnav_rl/observations/observations.yaml",
+            "/home/le/arena5_ws/src/Arena/arena_training/deps/rosnav_rl/rosnav_rl/rosnav_rl/observations/observations.yaml",
             "r",
         ) as file:
             config = yaml.safe_load(file)
@@ -228,38 +220,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Encodes the given observation using the model space encoder."""
         return self._model_space_manager.encode_observation(observation)
 
-    def _wait_for_action_consumption(self, timeout: float = 20.0) -> None:
-        """
-        Waits for the `get_command` service to consume the action set by `step()`.
-
-        This method is called from `step()` to synchronize with the ROS service.
-        It waits until `_on_get_command_request` signals that it has taken the action.
-
-        Args:
-            timeout (float): Maximum time to wait in seconds.
-
-        Raises:
-            RuntimeError: If the timeout is exceeded, indicating a likely deadlock
-                          or issue with the simulation controller.
-        """
-        with self._action_condition:
-            # Wait until the service signals that it has consumed the action.
-            # The `wait_for` method returns False on timeout.
-            if not self._action_condition.wait_for(
-                lambda: self._action_is_consumed, timeout=timeout
-            ):
-                self.node.get_logger().error(
-                    f"Timeout waiting for action to be consumed after {timeout}s. "
-                    "The simulation controller may not be requesting commands. "
-                    f"Action available: {self._action_is_available}, "
-                    f"Action consumed: {self._action_is_consumed}"
-                )
-                # Force reset the state to prevent permanent deadlock
-                self._action_is_consumed = True
-                self._action_is_available = False
-                self._pending_action = None
-                raise RuntimeError("Action consumption timeout")
-
     @flush_errors_decorator
     def step(
         self, action: np.ndarray
@@ -267,37 +227,17 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """
         Processes a single step in the environment.
 
-        This method performs the following key actions:
         1. Decodes the action provided by the RL agent.
-        2. Makes the action available for the `get_command` ROS service.
-        3. Notifies the service that an action is ready.
-        4. Waits for the service to consume the action, ensuring synchronization.
-        5. After the action is consumed, it retrieves the new observation from the simulation.
-        6. Calculates the reward and determines if the episode has terminated.
-        7. Encodes the observation and returns the standard Gymnasium step tuple.
+        2. Publishes the velocity command directly to ``cmd_vel``.
+        3. Collects the new observation from the simulation.
+        4. Calculates the reward and determines if the episode has terminated.
+        5. Returns the standard Gymnasium step tuple.
         """
-        # if self.__is_first_step:
-        #     self._setup_action_service()
-
         decoded_action = self._decode_action(action)
 
-        # Make the action available to the service and notify it.
-        with self._action_condition:
-            if not self._action_is_consumed:
-                self.node.get_logger().warn(
-                    "New action is being set, but previous one was not consumed. "
-                    "This may indicate a synchronization issue."
-                )
-            self._pending_action = decoded_action
-            self._action_is_available = True
-            self._action_is_consumed = False
-            # Notify the waiting service thread that an action is ready.
-            self._action_condition.notify()
+        # Publish velocity command directly — no nav2 controller dependency.
+        self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
 
-        # Wait for the simulation controller to request and consume the action.
-        self._wait_for_action_consumption()
-
-        # Once the action is consumed, proceed with the environment step.
         obs_dict = self.observation_collector.get_observations(
             simulation_state_container=self.__simulation_state_container,
             is_first=self.__is_first_step,
@@ -325,104 +265,67 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             info,
         )
 
-    def _on_get_command_request(
-        self, request: GetCommand.Request, response: GetCommand.Response
-    ) -> GetCommand.Response:
-        """
-        ROS2 service callback for receiving command requests from the simulation.
-
-        This callback waits for an action to be made available by the `step()` method,
-        responds to the service request with that action, and then signals to the
-        `step()` method that the action has been consumed.
-
-        Args:
-            request: The service request (unused).
-            response: The service response to be filled with the action.
-
-        Returns:
-            The service response containing the Twist command.
-        """
-        with self._action_condition:
-            # Wait until an action is available from the step() method.
-            # A timeout is included to prevent the service from hanging indefinitely.
-            if not self._action_condition.wait_for(
-                lambda: self._action_is_available, timeout=5.0
-            ):
-                self.node.get_logger().warn(
-                    "[Service] Timeout waiting for a new action from the agent. "
-                    "Responding with a zero-velocity command."
-                )
-                response.twist = Twist()
-                return response
-
-            # An action is available, so consume it.
-            assert self._pending_action is not None
-            response.twist = get_twist_from_action(self._pending_action)
-            self.node.get_logger().debug(
-                f"[Service] Responding with action: {self._pending_action}"
-            )
-
-            # Reset flags and notify the waiting step() method.
-            self._pending_action = None
-            self._action_is_available = False
-            self._action_is_consumed = True
-            self._action_condition.notify()
-
-        return response
-
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[Dict] = None
     ) -> Tuple[EncodedObservationDict, InformationDict]:
         """
         Resets the environment to its initial state and returns an initial observation.
         """
+        # Ensure initialization has happened (for init_by_call=True case)
+        if not self._initialized:
+            self._initialize_environment()
+
         super().reset(seed=seed)
 
-        # Reset synchronization state
-        with self._action_condition:
-            self._pending_action = None
-            self._action_is_available = False
-            self._action_is_consumed = True
-            self._action_condition.notify_all()  # Wake up any waiting threads
+        # Stop the robot immediately.
+        if self._cmd_vel_pub is not None:
+            self._cmd_vel_pub.publish(Twist())
 
-        # Reset episode-specific variables
-        self._episode += 1
-        self._steps_curr_episode = 0
-        self.__is_first_step = True
+        try:
+            # Reset episode-specific variables
+            self._episode += 1
+            self._steps_curr_episode = 0
+            self.__is_first_step = True
 
-        self.node.get_logger().info(
-            f"[{self.ns.to_string()}] Resetting environment for episode {self._episode}..."
-        )
+            self.node.get_logger().info(
+                f"[{self.ns.to_string()}] Resetting environment for episode {self._episode}..."
+            )
 
-        self._before_task_reset()
-        self.reset_task()
-        self._after_task_reset()
+            self._before_task_reset()
+            self.reset_task()
+            self._after_task_reset()
 
-        self._reward_function.reset()
+            self._reward_function.reset()
 
-        # Get the initial observation after reset.
-        obs_dict = self.observation_collector.get_observations(
-            is_terminal=False, is_first=True
-        )
-        obs_dict["is_first"] = True  # Indicate it's the first observation
+            # Get the initial observation after reset.
+            obs_dict = self.observation_collector.get_observations(
+                is_terminal=False, is_first=True
+            )
+            obs_dict["is_first"] = True  # Indicate it's the first observation
+
+        finally:
+            pass
 
         info = {}
         return self._encode_observation(obs_dict), info
 
     def close(self):
-        """Cleans up resources, like ROS2 services and subscribers."""
+        """Cleans up ROS2 resources."""
         self.node.get_logger().info(
             "Closing environment and shutting down ROS components."
         )
 
         self.observation_collector.shutdown()
-        if getattr(self, "_get_command_srv", None):
-            self._get_command_srv.destroy()
+        if getattr(self, "_cmd_vel_pub", None):
+            self.node.destroy_publisher(self._cmd_vel_pub)
         if getattr(self, "_reset_task_srv", None):
             self._reset_task_srv.destroy()
 
     def reset_task(self):
-        if not self._reset_task_srv or not self._reset_task_srv.service_is_ready():
+        if (
+            not getattr(self, "_reset_task_srv", None)
+            or not self._reset_task_srv.service_is_ready()
+        ):
             self.node.get_logger().warn("Reset task service client is not available.")
             return False
 
