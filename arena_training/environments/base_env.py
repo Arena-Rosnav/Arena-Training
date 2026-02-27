@@ -321,7 +321,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if getattr(self, "_reset_task_srv", None):
             self._reset_task_srv.destroy()
 
-    def reset_task(self):
+    def reset_task(self, timeout: float = 10.0, retries: int = 2):
+        """Call the task-generator's reset_task service and **block** until it
+        completes (or *timeout* seconds elapse).  Without a successful reset
+        the goal/obstacle positions are stale and the episode will terminate
+        immediately, so we retry on failure.
+
+        Args:
+            timeout:  Seconds to wait for the service response per attempt.
+            retries:  Number of additional attempts after the first failure.
+        """
         if (
             not getattr(self, "_reset_task_srv", None)
             or not self._reset_task_srv.service_is_ready()
@@ -329,31 +338,41 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.node.get_logger().warn("Reset task service client is not available.")
             return False
 
-        completion_event = threading.Event()
-        result_container = {"success": False, "exception": None}
+        for attempt in range(1 + retries):
+            completion_event = threading.Event()
+            result_container = {"success": False, "exception": None}
 
-        def done_callback(future):
-            try:
-                result = future.result()
-                result_container["success"] = result is not None
-            except Exception as e:
-                result_container["exception"] = e
-            finally:
-                completion_event.set()
+            def done_callback(future):
+                try:
+                    result = future.result()
+                    result_container["success"] = result is not None
+                except Exception as e:
+                    result_container["exception"] = e
+                finally:
+                    completion_event.set()
 
-        future = self._reset_task_srv.call_async(EmptySrv.Request())
-        future.add_done_callback(done_callback)
+            future = self._reset_task_srv.call_async(EmptySrv.Request())
+            future.add_done_callback(done_callback)
 
-        # Wait with timeout
-        if completion_event.wait(timeout=2.5):
-            if result_container["success"]:
-                self.node.get_logger().debug("Service call successful.")
+            if completion_event.wait(timeout=timeout):
+                if result_container["success"]:
+                    self.node.get_logger().debug("Service call successful.")
+                    return True
+                else:
+                    self.node.get_logger().error(
+                        f"Service call failed (attempt {attempt + 1}): "
+                        f"{result_container['exception']}"
+                    )
             else:
                 self.node.get_logger().error(
-                    f"Service call failed: {result_container['exception']}"
+                    f"Service call timeout after {timeout}s (attempt {attempt + 1}/{1 + retries})."
                 )
-        else:
-            self.node.get_logger().error("Service call timeout.")
+                future.cancel()
+
+        self.node.get_logger().error(
+            "reset_task failed after all retries – episode will use stale goals."
+        )
+        return False
 
     def _before_task_reset(self):
         """Hook for executing actions before the task is reset."""
