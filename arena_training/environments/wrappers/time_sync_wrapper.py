@@ -31,6 +31,7 @@ class TimeSyncWrapper(gym.Wrapper):
         # Time when the last env.step() was allowed to initiate.
         # Initialized to current time, so the first step call will also adhere to the interval logic.
         self.last_step_initiation_time: Time = self.clock.now()
+        self._skip_frequency_check = True  # Don't warn on the very first step
 
     def _initialize_environment(self):
         """
@@ -59,8 +60,11 @@ class TimeSyncWrapper(gym.Wrapper):
         elapsed_nanosec = (current_time - self.last_step_initiation_time).nanoseconds
 
         # Warn if the actual interval is longer than the desired one, indicating a missed control frequency.
-        # We check this before the waiting loop.
-        if elapsed_nanosec > self.control_interval_nanosec + self.warning_slop_nanosec:
+        # Skip the check right after a reset — the gap is caused by the reset itself
+        # (or SubprocVecEnv waiting on sibling envs), not a real control loop miss.
+        if self._skip_frequency_check:
+            self._skip_frequency_check = False
+        elif elapsed_nanosec > self.control_interval_nanosec + self.warning_slop_nanosec:
             desired_hz = 1e9 / self.control_interval_nanosec
             actual_hz = 1e9 / elapsed_nanosec
             self.node.get_logger().warn(
@@ -95,4 +99,5 @@ class TimeSyncWrapper(gym.Wrapper):
         # It will enforce its interval relative to the actual time of reset completion.
         reset_return_value = self.env.reset(**kwargs)
         self.last_step_initiation_time = self._now()
+        self._skip_frequency_check = True  # First step after reset: don't warn
         return reset_return_value
