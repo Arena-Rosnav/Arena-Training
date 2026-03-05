@@ -1,4 +1,4 @@
 [submodule "deps/rosnav_rl"]
     path = deps/rosnav_rl
     url = https://github.com/Arena-Rosnav/rosnav-rl
-    branch = observation_restructuring
+    branch = ros2
