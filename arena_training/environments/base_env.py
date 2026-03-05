@@ -65,6 +65,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         wait_for_obs: bool = False,
         obs_unit_kwargs: Optional[Dict[str, Any]] = None,
         train_mode: bool = True,
+        observations_config: Optional[str] = None,
         *args,
         **kwargs,
     ):
@@ -88,6 +89,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 sources to publish at least once before proceeding. Defaults to False.
             obs_unit_kwargs (Optional[Dict[str, Any]]): A dictionary of keyword arguments to be
                 passed to the constructors of individual observation units. Defaults to None.
+            observations_config (Optional[str]): Path to the observations YAML config file.
+                If None, uses the default bundled config.
         """
         super().__init__()
         self.node = node
@@ -102,6 +105,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
+        self.__observations_config_path = observations_config
 
         self._steps_curr_episode = 0
         self._episode = 0
@@ -158,11 +162,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _setup_observation_manager(self):
         """Configures and initializes the ObservationManager."""
-        # TODO: Implement observation manager setup
-        with open(
-            "/home/le/arena5_ws/src/Arena/arena_training/deps/rosnav_rl/rosnav_rl/rosnav_rl/observations/observations.yaml",
-            "r",
-        ) as file:
+        import importlib.resources
+
+        # Use configured path, or fall back to bundled default
+        obs_config_path = self.__observations_config_path
+        if obs_config_path is None:
+            obs_config_path = str(
+                importlib.resources.files("rosnav_rl")
+                / "observations"
+                / "observations.yaml"
+            )
+
+        with open(obs_config_path, "r") as file:
             config = yaml.safe_load(file)
 
         # Create the observation manager from the configuration
@@ -256,6 +267,25 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
         obs_dict["is_terminal"] = done
         self.__is_first_step = False
+
+        if done:
+            done_reason = info.get("done_reason", "unknown")
+            is_success = info.get("is_success", False)
+            msg = (
+                f"[{self.ns.to_string()}] Episode {self._episode} ended — "
+                f"reason: {done_reason}, steps: {self._steps_curr_episode}, "
+                f"reward: {reward:.3f}"
+            )
+            if is_success:
+                # Log world-frame goal position if available in the observation dict.
+                goal, subgoal, robot = obs_dict.get("goal_pose"), obs_dict.get("subgoal_pose"), obs_dict.get("robot_pose")
+                if goal is not None:
+                    msg += f", goal: {goal}"
+                if subgoal is not None:
+                    msg += f", subgoal: {subgoal}"
+                if robot is not None:
+                    msg += f", robot: {robot}"
+            self.node.get_logger().info(msg)
 
         return (
             self._encode_observation(obs_dict),

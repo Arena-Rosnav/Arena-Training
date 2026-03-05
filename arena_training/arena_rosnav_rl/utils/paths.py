@@ -7,6 +7,11 @@ from typing import Dict, Optional, Type
 
 from ament_index_python.packages import get_package_share_directory
 
+# Resolve path back through symlinks to the actual source tree so agent
+# artifacts are always written to Arena/arena_training/agents, not the
+# install tree or a site-packages location.
+_ARENA_TRAINING_ROOT = Path(__file__).resolve().parents[3]  # …/Arena/arena_training
+
 # import rospy
 
 __all__ = [
@@ -29,7 +34,7 @@ class RosPackages:
 
     # TODO: Consider using a more dynamic approach to fetch package paths
     SIMULATION_SETUP: Path = Path(get_package_share_directory("arena_simulation_setup"))
-    ROSNAV: Path = Path(get_package_share_directory("rosnav_rl"))
+    ARENA_TRAINING: Path = _ARENA_TRAINING_ROOT  # source tree root, not install
     ARENA_BRINGUP: Path = Path(get_package_share_directory("arena_bringup"))
 
 
@@ -57,7 +62,7 @@ class AgentComponent(PathComponent):
 
     def __init__(self, agent_name: str):
         self.agent_name = agent_name
-        self._base = RosPackages.ROSNAV / "agents" / agent_name
+        self._base = _ARENA_TRAINING_ROOT / "agents" / agent_name
 
 
 class Agent(AgentComponent):

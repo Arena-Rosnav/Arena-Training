@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
-torch._dynamo.config.disable = True
+# torch._dynamo.config.disable = True
 
 
 def get_trainer(config: TrainingCfg):
