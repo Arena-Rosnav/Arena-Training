@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Union
+from typing import Optional, Union
 
 
 class GeneralCfg(BaseModel):
@@ -12,6 +12,8 @@ class GeneralCfg(BaseModel):
         max_num_moves_per_eps (int): Maximum number of moves allowed per episode. Default is 150.
         goal_radius (float): Radius around the goal within which the agent is considered to have reached the goal. Default is 0.4.
         safety_distance (float): Minimum safety distance to be maintained by the agent (considers robot radius). Default is 1.0.
+        control_hz (float): Control frequency in Hz for the TimeSyncWrapper. Default is 10.0.
+        observations_config (str): Path to the observations YAML config file.
     """
 
     debug_mode: bool = False
@@ -21,3 +23,5 @@ class GeneralCfg(BaseModel):
     goal_radius: float = Field(0.4, title="Goal Radius", gt=0)
     safety_distance: float = Field(1.0, gt=0)
     verbose: Union[int, bool] = Field(False, title="Verbose Mode")
+    control_hz: float = Field(10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
+    observations_config: Optional[str] = Field(None, description="Path to observations YAML config file")

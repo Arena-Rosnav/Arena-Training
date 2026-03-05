@@ -7,6 +7,7 @@ class EpisodeLoggingCfg(BaseModel):
     record_actions: bool = True
 
 class WandbCfg(BaseModel):
+    enabled: bool = False  # Set to true to enable Weights & Biases logging
     project_name: str = Field(
         default="Arena-RL", 
         title="Project Name", 

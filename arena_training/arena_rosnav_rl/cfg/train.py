@@ -12,7 +12,7 @@ from .sb3_cfg import ArenaSB3Cfg
 class TrainingCfg(BaseModel):
     __version__ = "0.1.0"
 
-    arena_cfg: Union[ArenaBaseCfg, ArenaSB3Cfg]
+    arena_cfg: Union[ArenaSB3Cfg, ArenaBaseCfg]
     agent_cfg: rosnav_rl.AgentCfg
     resume: bool = False
 

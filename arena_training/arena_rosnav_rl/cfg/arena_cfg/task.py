@@ -62,7 +62,7 @@ class StagedCfg(BaseModel):
 
     # ROS2 parameter communication settings
     parameter_node_template: str = Field(
-        default="/task_generator_node",
+        default="/task_generator_node/env{i}",
         description="Template for task generator node name",
     )
     timeout: float = Field(
