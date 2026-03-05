@@ -1,4 +1,4 @@
-from typing import Any, Callable, List, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import gymnasium as gym
 import rclpy
@@ -106,12 +106,10 @@ def _test_init_env_fnc(
     obs_unit_kwargs: dict = None,
     seed: int = 0,
     wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    observations_config: Optional[str] = None,
 ) -> callable:
 
     def _init_env() -> Union[gym.Env, gym.Wrapper]:
-        # Create a new node in each worker process
-        # rclpy.init()  # Initialize ROS in worker process
-        # local_node = SupervisorNode(node_name=f"{node_name}_env")
         env = env_class(
             node=node,
             ns=ns,
@@ -121,6 +119,7 @@ def _test_init_env_fnc(
             max_steps_per_episode=max_steps_per_episode,
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
+            observations_config=observations_config,
         )
         for wrapper in wrappers or []:
             env = wrapper(env)
@@ -132,32 +131,29 @@ def _test_init_env_fnc(
 
 def sb3_wrap_env(
     node: SupervisorNode,
-    train_env_fncs: List[callable],
-    eval_env_fncs: List[callable],
+    env_fncs: List[callable],
     general_cfg: GeneralCfg,
     monitoring_cfg: MonitoringCfg,
     profiling_cfg: ProfilingCfg,
-) -> Tuple[VecEnv, VecEnv]:
+) -> VecEnv:
     """
-    Wraps the training and evaluation environments with the necessary vectorized wrappers.
+    Creates and wraps a single vectorized environment used for both training and
+    evaluation (shared-env mode).
 
     Args:
-        train_env_fncs (List[callable]): List of functions to initialize training environments.
-        eval_env_fncs (List[callable]): List of functions to initialize evaluation environments.
-        rl_agent (Rosnav_RL_Agent): The reinforcement learning agent.
-        agent_cfg (AgentCfg): Configuration for the agent.
-        general_cfg (GeneralCfg): General configuration.
-        normalization_cfg (NormalizationCfg): Configuration for normalization.
-        monitoring_cfg (MonitoringCfg): Configuration for monitoring.
-        profiling_cfg (ProfilingCfg): Configuration for profiling.
+        node: ROS2 supervisor node used for profiling.
+        env_fncs: List of callables that each return an initialized gym environment.
+        general_cfg: General training configuration (debug_mode, etc.).
+        monitoring_cfg: Configuration for episode-stats recording.
+        profiling_cfg: Configuration for step/reset profiling.
 
     Returns:
-        Tuple[VecEnv, VecEnv]: The wrapped training and evaluation environments.
+        A wrapped VecEnv ready for both rollout collection and periodic evaluation.
     """
 
     def create_env(fncs):
         return (
-            DelayedSubprocVecEnv(fncs, start_method="fork")
+            DelayedSubprocVecEnv(fncs, start_method="forkserver")
             if not general_cfg.debug_mode
             else DummyVecEnv(fncs)
         )
@@ -169,7 +165,7 @@ def sb3_wrap_env(
                 after_x_eps=monitoring_cfg.episode_logging.last_n_episodes,
                 record_actions=monitoring_cfg.episode_logging.record_actions,
             )
-            if monitoring_cfg.episode_logging is not None
+            if monitoring_cfg is not None and monitoring_cfg.episode_logging is not None
             else env
         )
 
@@ -182,28 +178,17 @@ def sb3_wrap_env(
                 profile_reset=profiling_cfg.do_profile_reset,
                 per_call=profiling_cfg.per_call,
                 log_file=profiling_cfg.log_file,
+                print_stats=profiling_cfg.print_stats,
                 enable_subscribers=enable_subscribers,
             )
-            if profiling_cfg is not None
+            if profiling_cfg is not None and node is not None
             else env
         )
 
-    train_env = create_env(train_env_fncs)
-    eval_env = create_env(eval_env_fncs)
-
-    # train_env = apply_vec_framestack(train_env)
-    # eval_env = apply_vec_framestack(eval_env)
-
-    # train_env = apply_vec_normalize(train_env, is_training=True)
-    # eval_env = apply_vec_normalize(eval_env, is_training=False)
-
-    train_env = apply_vec_stats_recorder(train_env)
-    eval_env = apply_vec_stats_recorder(eval_env)
-
-    train_env = apply_profiling(train_env)
-    eval_env = apply_profiling(eval_env, enable_subscribers=False)
-
-    return train_env, eval_env
+    env = create_env(env_fncs)
+    env = apply_vec_stats_recorder(env)
+    env = apply_profiling(env)
+    return env
 
 
 def make_envs(
@@ -215,6 +200,7 @@ def make_envs(
     namespace_fn: Callable,  # Changed from callable
     node: SupervisorNode = None,
     wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    observations_config: Optional[str] = None,
 ) -> List[Callable]:
     """
     Creates a list of environment initialization functions.
@@ -231,6 +217,7 @@ def make_envs(
         init_env_by_call: If True, environments will be initialized when their function is called
         namespace_fn: Function that takes an index and returns a namespace for the environment
         wrappers: Optional list of gym wrappers to apply to each environment
+        observations_config: Path to a custom observations YAML config file
 
     Returns:
         List of callables, each initializing a gym environment when called
@@ -251,6 +238,7 @@ def make_envs(
             max_steps_per_episode=max_steps,
             init_by_call=init_env_by_call,
             wrappers=wrappers,
+            observations_config=observations_config,
         )
 
     def create_env_fncs(

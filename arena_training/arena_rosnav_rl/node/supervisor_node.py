@@ -21,6 +21,9 @@ class SupervisorNode(Node):
         self._executor = MultiThreadedExecutor()
         self._executor.add_node(self)
         self._spin_thread = threading.Thread(target=self._spin_loop)
+        
+        self.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
+
 
     def start_spinning(self):
         """Starts the spin loop in a background thread."""

@@ -102,25 +102,26 @@ class VecStatsRecorder(VecEnvWrapper):
         print(f"Done reasons: {self.done_reasons}")
         print("-" * 40, sep="", end="\n")  # Print another line separator
 
-        wandb.log(
-            {
-                "train_episode/step_time": avg_step_time,
-                "train_episode/reward": avg_episode_return,
-                "train_episode/length": avg_episode_length,
-                "train_episode/success_rate": self.done_reasons[
-                    DONE_REASONS.SUCCESS.name
-                ]
-                / len(self.episode_lengths),
-                "train_episode/collision_rate": self.done_reasons[
-                    DONE_REASONS.COLLISION.name
-                ]
-                / len(self.episode_lengths),
-                "train_episode/timeout_rate": self.done_reasons[
-                    DONE_REASONS.STEP_LIMIT.name
-                ]
-                / len(self.episode_lengths),
-            }
-        )
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    "train_episode/step_time": avg_step_time,
+                    "train_episode/reward": avg_episode_return,
+                    "train_episode/length": avg_episode_length,
+                    "train_episode/success_rate": self.done_reasons[
+                        DONE_REASONS.SUCCESS.name
+                    ]
+                    / len(self.episode_lengths),
+                    "train_episode/collision_rate": self.done_reasons[
+                        DONE_REASONS.COLLISION.name
+                    ]
+                    / len(self.episode_lengths),
+                    "train_episode/timeout_rate": self.done_reasons[
+                        DONE_REASONS.STEP_LIMIT.name
+                    ]
+                    / len(self.episode_lengths),
+                }
+            )
 
     def reset(self) -> VecEnvObs:
         return self.venv.reset()  # pytype:disable=annotation-type-mismatch

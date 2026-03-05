@@ -3,16 +3,15 @@ from typing import TYPE_CHECKING, List, Optional
 from ...node import SupervisorNode
 from ...cfg.arena_cfg.task import TaskCfg
 from rosnav_rl.utils.stable_baselines3.callbacks import (
-    RosnavEvalCallback,
     StopTrainingOnRewardThreshold,
     StopTrainingOnSuccessThreshold,
 )
 from rosnav_rl.utils.stable_baselines3.staged_train_callback import StagedTrainCallback
 from stable_baselines3.common.vec_env import VecEnv
+from .shared_env_eval_callback import SharedEnvEvalCallback
 
 if TYPE_CHECKING:
     from ...cfg.sb3_cfg import ArenaCallbacksCfg
-
 
 def _create_stop_training_callbacks(
     threshold_type: str,
@@ -52,8 +51,10 @@ def init_sb3_callbacks(
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
     debug_mode: bool,
+    train_max_steps: int,
+    eval_max_steps: int,
     task_cfg: Optional[TaskCfg] = None,
-) -> RosnavEvalCallback:
+) -> SharedEnvEvalCallback:
     """
     Initialize Stable Baselines3 (SB3) callbacks for training and evaluation.
 
@@ -131,9 +132,12 @@ def init_sb3_callbacks(
         None,
     )
 
-    # Create main evaluation callback
-    eval_cb = RosnavEvalCallback(
+    # Create the eval callback using the shared-env approach: eval runs in the
+    # same VecEnv as training; _max_steps_per_episode is switched temporarily.
+    eval_cb = SharedEnvEvalCallback(
         eval_env=eval_env,
+        train_max_steps=train_max_steps,
+        eval_max_steps=eval_max_steps,
         n_eval_episodes=periodic_eval_cfg.n_eval_episodes,
         eval_freq=periodic_eval_cfg.eval_freq,
         log_path=eval_log_path,
