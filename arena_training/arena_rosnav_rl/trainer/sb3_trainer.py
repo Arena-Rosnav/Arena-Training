@@ -17,6 +17,8 @@ from .arena_trainer import (
     TrainingHookStages,
 )
 
+from stable_baselines3.ppo import PPO
+
 
 @dataclass
 class SB3Environment:
@@ -26,7 +28,9 @@ class SB3Environment:
     def close(self) -> None:
         """Close the training and evaluation environments."""
         self.train_env.close()
-        self.eval_env.close()
+        # eval_env may be the same object as train_env (shared-env mode)
+        if self.eval_env is not self.train_env:
+            self.eval_env.close()
 
 
 class StableBaselines3Trainer(ArenaTrainer):
@@ -65,7 +69,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         _complete_model_initialization(train_env): Finalize model initialization
     """
 
-    __framework = SupportedRLFrameworks.STABLE_BASELINES3
+    _framework = SupportedRLFrameworks.STABLE_BASELINES3
     _config_type = arena_cfg.ArenaSB3Cfg
     environment: SB3Environment
 
@@ -148,36 +152,25 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
 
         train_env_fncs = make_envs(
-            node=self._supervisor_node,
+            node=self.node if self.config.arena_cfg.general.debug_mode else None,  # Each worker creates its own node after rclpy.init()
             rl_agent=self.agent,
             n_envs=self.config.arena_cfg.general.n_envs,
             max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
-            init_env_by_call=not self.config.arena_cfg.general.debug_mode,
-            namespace_fn=lambda _: "/task_generator_node/jackal",
-            simulation_state_container=self.simulation_state_container,
-            wrappers=[partial(TimeSyncWrapper, control_hz=1)],
-        )
-        eval_env_fncs = make_envs(
-            node=self._supervisor_node,
-            rl_agent=self.agent,
-            n_envs=1,
-            namespace_fn=lambda _: "/task_generator_node/jackal",
-            max_steps=self.config.arena_cfg.callbacks.periodic_evaluation.max_num_moves_per_eps,
             init_env_by_call=False,
+            namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
             simulation_state_container=self.simulation_state_container,
-            wrappers=[partial(TimeSyncWrapper, control_hz=1)],
+            wrappers=[partial(TimeSyncWrapper, control_hz=self.config.arena_cfg.general.control_hz)],
+            observations_config=self.config.arena_cfg.general.observations_config,
         )
-        train_env, eval_env = sb3_wrap_env(
+        env = sb3_wrap_env(
             node=self._supervisor_node,
-            train_env_fncs=train_env_fncs,
-            eval_env_fncs=eval_env_fncs,
+            env_fncs=train_env_fncs,
             general_cfg=self.config.arena_cfg.general,
             monitoring_cfg=self.config.arena_cfg.monitoring,
             profiling_cfg=self.config.arena_cfg.profiling,
         )
-        train_env = self.agent.model.setup_environment(train_env)
-        eval_env = self.agent.model.setup_environment(eval_env, is_training=False)
-        self.environment = SB3Environment(train_env, eval_env)
+        env = self.agent.model.setup_environment(env)
+        self.environment = SB3Environment(train_env=env, eval_env=env)
 
     def _setup_callbacks(self, environment: SB3Environment) -> None:
         """Initialize training callbacks."""
@@ -191,13 +184,17 @@ class StableBaselines3Trainer(ArenaTrainer):
             model_save_path=self.paths[Paths.Agent].path,
             eval_log_path=self.paths[Paths.AgentEval].path,
             debug_mode=self.config.arena_cfg.general.debug_mode,
+            train_max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
+            eval_max_steps=self.config.arena_cfg.callbacks.periodic_evaluation.max_num_moves_per_eps,
         )
 
     def _setup_monitoring(self) -> None:
         """Set up monitoring tools if not in debug mode."""
         if (
             not self.config.arena_cfg.general.debug_mode
-            and self.config.arena_cfg.monitoring.wandb
+            and self.config.arena_cfg.monitoring is not None
+            and self.config.arena_cfg.monitoring.wandb is not None
+            and self.config.arena_cfg.monitoring.wandb.enabled
         ):
             setup_wandb(
                 run_name=self.config.agent_cfg.name,
@@ -256,7 +253,7 @@ class StableBaselines3Trainer(ArenaTrainer):
 
 def main():
     rclpy.init()
-    config = load_training_config("sb_training_config")
+    config = load_training_config("/home/le/arena5_ws/src/Arena/arena_bringup/configs/training/sb_training_config.yaml")
 
     trainer = StableBaselines3Trainer(config)
 

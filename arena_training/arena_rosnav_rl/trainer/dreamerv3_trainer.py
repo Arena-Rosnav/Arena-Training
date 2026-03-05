@@ -4,8 +4,8 @@ from typing import Tuple
 import rosnav_rl
 import rosnav_rl.model.dreamerv3 as dreamerv3
 from rosnav_rl import SupportedRLFrameworks
+import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
-from ..cfg import cfg as arena_cfg
 from ..tools.config import load_training_config
 
 # from ..tools.constants import SIMULATION_NAMESPACES
@@ -31,7 +31,7 @@ class DreamerV3Trainer(ArenaTrainer):
         This class requires a configuration of type ArenaDreamerV3Cfg.
     """
 
-    __framework = SupportedRLFrameworks.DREAMER_V3
+    _framework = SupportedRLFrameworks.DREAMER_V3
     _config_type = arena_cfg.ArenaBaseCfg
     environment: Tuple[dreamerv3.Parallel, dreamerv3.Parallel]
 

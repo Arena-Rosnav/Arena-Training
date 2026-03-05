@@ -2,11 +2,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Type
 
-import arena_rosnav_rl.cfg as arena_cfg
 import rosnav_rl
+import arena_training.arena_rosnav_rl.cfg as arena_cfg
+
 from rosnav_rl.rl_agent import RL_Agent
 from rosnav_rl.states import SimulationStateContainer
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
+
 
 from ..node import SupervisorNode
 from ..tools.general import (
@@ -18,7 +20,6 @@ from ..tools.states import get_arena_states
 from ..utils import paths as Paths
 from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
-
 
 @dataclass
 class TrainingArguments:
@@ -59,7 +60,7 @@ class ArenaTrainer(ABC):
     - _setup_monitoring: Set up monitoring and logging tools
     """
 
-    __framework: SupportedRLFrameworks
+    _framework: SupportedRLFrameworks
     _config_type: Type[arena_cfg.ArenaBaseCfg]
 
     config: arena_cfg.TrainingCfg
@@ -92,7 +93,7 @@ class ArenaTrainer(ABC):
     def _validate_config(self, config: arena_cfg.TrainingCfg) -> None:
         if not isinstance(config.arena_cfg, self._config_type):
             raise TypeError(
-                f"Invalid configuration type: {type(config.arena_cfg)} for {self.__framework}. "
+                f"Invalid configuration type: {type(config.arena_cfg)} for {self._framework}. "
                 f"Expected one of: {self._config_type}"
             )
 
@@ -195,7 +196,7 @@ class ArenaTrainer(ABC):
         """Write configuration to file if not in debug mode."""
         if not self.is_debug_mode:
             write_config_yaml(
-                self.config.model_dump(),
+                self.config.model_dump(mode="json"),
                 self.paths[Paths.Agent].path / "training_config.yaml",
             )
 
