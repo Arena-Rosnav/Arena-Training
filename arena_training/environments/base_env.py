@@ -126,7 +126,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             return  # Already initialized
 
         if self.node is None:
-            # rclpy.init()  # Initialize ROS in worker process
+            if not rclpy.ok():
+                rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
             self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
@@ -147,9 +148,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        if not self._reset_task_srv.wait_for_service(timeout_sec=3.0):
+        if not self._reset_task_srv.wait_for_service(timeout_sec=10.0):
             self.node.get_logger().warn(
-                f"Service '{task_srv_name}' not available after 3 seconds."
+                f"Service '{task_srv_name}' not available after 10 seconds. "
+                f"Ensure the simulation and task_generator are running."
             )
 
         # Direct cmd_vel publisher — the sole source of velocity commands
@@ -361,12 +363,21 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             timeout:  Seconds to wait for the service response per attempt.
             retries:  Number of additional attempts after the first failure.
         """
-        if (
-            not getattr(self, "_reset_task_srv", None)
-            or not self._reset_task_srv.service_is_ready()
-        ):
-            self.node.get_logger().warn("Reset task service client is not available.")
+        if not getattr(self, "_reset_task_srv", None):
+            self.node.get_logger().warn("Reset task service client is not available (client not created).")
             return False
+
+        if not self._reset_task_srv.service_is_ready():
+            self.node.get_logger().warn(
+                "Reset task service not ready — waiting up to 10 s for task_generator..."
+            )
+            if not self._reset_task_srv.wait_for_service(timeout_sec=10.0):
+                self.node.get_logger().error(
+                    "Reset task service still unavailable after 10 s. "
+                    "Episode will use stale goal. "
+                    "Verify that the simulation and task_generator are running."
+                )
+                return False
 
         for attempt in range(1 + retries):
             completion_event = threading.Event()
