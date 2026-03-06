@@ -1,5 +1,7 @@
+import logging
+from dataclasses import dataclass, field
 from functools import partial
-from typing import Tuple
+from typing import List
 
 import rosnav_rl
 import rosnav_rl.model.dreamerv3 as dreamerv3
@@ -7,41 +9,57 @@ from rosnav_rl import SupportedRLFrameworks
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
 from ..tools.config import load_training_config
-
-# from ..tools.constants import SIMULATION_NAMESPACES
 from ..tools.env_utils import make_envs
 from ..tools.model_utils import setup_wandb
 from ..trainer.arena_trainer import ArenaTrainer
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DreamerV3Environment:
+    """Container for DreamerV3 training/eval environment lists."""
+
+    train_envs: List = field(default_factory=list)
+    eval_envs: List = field(default_factory=list)
+
+    def close(self) -> None:
+        """Safely close all environment instances."""
+        seen = set()
+        for env in self.train_envs + self.eval_envs:
+            if id(env) in seen:
+                continue
+            seen.add(id(env))
+            try:
+                env.close()
+            except Exception:
+                pass
+
 
 class DreamerV3Trainer(ArenaTrainer):
-    """DreamerV3Trainer class for training agents using DreamerV3 framework.ks.DREAMER_V3
+    """Trainer for DreamerV3 reinforcement learning framework.
 
-    This class implements the ArenaTrainer interface for the DreamerV3 reinforcement learning
-    framework. It handles the setup of the agent, environment configuration, and training process
-    specific to DreamerV3.
+    Handles agent setup, environment configuration, and training
+    for the DreamerV3 world-model-based RL approach.
 
     Attributes:
-        __framework (SupportedRLFrameworks): The RL framework identifier, set to DREAMER_V3.
-        environment (Tuple[dreamerv3.Parallel, dreamerv3.Parallel]): Tuple containing training
-            and evaluation environments.
-        config (arena_cfg.TrainingCfg): Configuration for the trainer.
-
-    Note:
-        This class requires a configuration of type ArenaDreamerV3Cfg.
+        environment (DreamerV3Environment): Container with train/eval environment lists.
     """
 
     _framework = SupportedRLFrameworks.DREAMER_V3
     _config_type = arena_cfg.ArenaBaseCfg
-    environment: Tuple[dreamerv3.Parallel, dreamerv3.Parallel]
+    environment: DreamerV3Environment
 
     def __init__(self, config: arena_cfg.TrainingCfg):
         super().__init__(config, config.resume)
 
     def _setup_monitoring(self, *args, **kwargs):
+        """Set up monitoring tools (Weights & Biases) if enabled."""
         if (
-            self.config.arena_cfg.monitoring.wandb
-            and not self.config.arena_cfg.general.debug_mode
+            not self.config.arena_cfg.general.debug_mode
+            and self.config.arena_cfg.monitoring is not None
+            and self.config.arena_cfg.monitoring.wandb is not None
+            and self.config.arena_cfg.monitoring.wandb.enabled
         ):
             setup_wandb(
                 run_name=self.config.agent_cfg.name,
@@ -52,22 +70,19 @@ class DreamerV3Trainer(ArenaTrainer):
             )
 
     def _setup_agent(self, *args, **kwargs):
+        """Set up the DreamerV3 RL agent.
+
+        Sets the framework logdir from the trainer's paths dictionary (if
+        not already specified in the config) so that checkpoints, episodes,
+        and logs land next to the training_config.yaml.
         """
-        Set up the reinforcement learning agent for training.
+        from ..utils import paths as Paths
 
-        This method initializes the agent using the RoboNav RL agent class with the configured parameters.
+        # Ensure logdir is set before DreamerV3Model.__init__ runs
+        fw_cfg = self.config.agent_cfg.framework
+        if fw_cfg.general.logdir is None and hasattr(self, "paths"):
+            fw_cfg.general.logdir = str(self.paths[Paths.Agent].path)
 
-        Args:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
-
-        Returns:
-            None
-
-        Note:
-            The agent is created with the agent configuration from the config object and
-            is linked to the agent_state_container to maintain state during training.
-        """
         self.agent = rosnav_rl.RL_Agent(
             agent_cfg=self.config.agent_cfg,
             agent_state_container=self.agent_state_container,
@@ -75,90 +90,58 @@ class DreamerV3Trainer(ArenaTrainer):
         self.agent.initialize_model()
 
     def _setup_environment(self, *args, **kwargs):
+        """Set up the training and evaluation environments for DreamerV3.
+
+        Creates gym environments wrapped with DreamerV3-specific wrappers and
+        wraps them in either Parallel (daemon) or Damy (debug) executors.
+
+        Wrapper chain (innermost to outermost):
+            GazeboEnv -> WoTruncatedFlag -> TimeLimit -> SelectAction
+            -> UUID -> ResetWoInfo -> ChannelFirsttoLast
         """
-        Set up the training and evaluation environments for DreamerV3.
+        general_cfg = self.config.arena_cfg.general
 
-        This method initializes environments using the configuration parameters from the agent.
-        It creates training environments with specified wrappers and configurations and sets up
-        evaluation environments (currently identical to training environments).
-
-        The environment setup supports a debug mode where environments are created as dummy environments
-        instead of parallel environments.
-
-        Wrappers applied to environments:
-        - WoTruncatedFlag: Wrapper that removes truncated flag from environment
-        - TimeLimit: Limits the duration of episodes
-        - SelectAction: Selects the 'action' key from the action dictionary
-        - UUID: Adds a unique identifier to each environment
-        - ResetWoInfo: Resets environment without requiring info
-        - ChannelFirsttoLast: Converts observations from channel-first to channel-last format
-
-        Args:
-            *args: Variable length argument list passed to the environment creation.
-            **kwargs: Arbitrary keyword arguments passed to the environment creation.
-
-        Returns:
-            None: Sets self.environment as a tuple of (train_envs, eval_envs).
-        """
         train_env_fncs = make_envs(
+            node=self.node if general_cfg.debug_mode else None,
             rl_agent=self.agent,
-            n_envs=self.config.arena_cfg.general.n_envs,
-            max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
+            n_envs=general_cfg.n_envs,
+            max_steps=general_cfg.max_num_moves_per_eps,
             init_env_by_call=False,
-            namespace_fn="/task_generator_node/jackal",
+            namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
             simulation_state_container=self.simulation_state_container,
             wrappers=[
                 dreamerv3.WoTruncatedFlag,
                 partial(
                     dreamerv3.TimeLimit,
-                    duration=self.config.arena_cfg.general.max_num_moves_per_eps,
+                    duration=general_cfg.max_num_moves_per_eps,
                 ),
                 partial(dreamerv3.SelectAction, key="action"),
                 dreamerv3.UUID,
                 dreamerv3.ResetWoInfo,
                 dreamerv3.ChannelFirsttoLast,
+                dreamerv3.RenameObsForDreamer,
             ],
+            observations_config=general_cfg.observations_config,
         )
 
-        if self.config.arena_cfg.general.debug_mode:
+        if general_cfg.debug_mode:
             train_envs = [dreamerv3.Damy(init_fnc()) for init_fnc in train_env_fncs]
         else:
+            # Capture via default argument to avoid late-binding closure bug
             train_envs = [
-                dreamerv3.Parallel(lambda: init_fnc(), "daemon")
-                for init_fnc in train_env_fncs
+                dreamerv3.Parallel(lambda _f=fnc: _f(), "daemon")
+                for fnc in train_env_fncs
             ]
-        eval_envs = train_envs
-        self.environment = (train_envs, eval_envs)
+        # Shared envs for train and eval (same pattern as SB3 trainer)
+        self.environment = DreamerV3Environment(
+            train_envs=train_envs, eval_envs=train_envs
+        )
 
     def _train_impl(self, *args, **kwargs):
-        """
-        Implementation of the training process for DreamerV3 agent.
-
-        This method follows proper OOP design by calling self.agent.model.train()
-        and passes the StagedCfg model directly for curriculum learning.
-
-        Parameters:
-            *args: Variable length argument list (unused, for compatibility).
-            **kwargs: Arbitrary keyword arguments (unused, for compatibility).
-        """
-        # Extract curriculum configuration from arena_cfg
-        curriculum_config = None
-        if (hasattr(self.config, 'arena_cfg') and 
-            hasattr(self.config.arena_cfg, 'task') and 
-            hasattr(self.config.arena_cfg.task, 'staged') and
-            self.config.arena_cfg.task.tm_modules == "staged"):
-            curriculum_config = self.config.arena_cfg.task.staged
-
-        verbose = getattr(self.config.arena_cfg.general, "verbose", 0)
-
-        # Call model's train method directly - proper OOP design
-        # Pass the StagedCfg model directly instead of converting to dict
+        """Run the DreamerV3 training loop via the model's own train() method."""
         self.agent.model.train(
-            train_envs=self.environment[0],
-            eval_envs=self.environment[1],
-            curriculum_config=curriculum_config,
-            node=self.node,
-            verbose=verbose,
+            train_envs=self.environment.train_envs,
+            eval_envs=self.environment.eval_envs,
         )
 
 
