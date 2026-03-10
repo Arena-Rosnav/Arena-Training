@@ -45,13 +45,25 @@ _STDLIB_STR_TO_ROS_SEVERITY: dict = {
     "CRITICAL": "FATAL",
 }
 
+# rcutils env-var name and its expected token values (DEBUG/INFO/WARN/ERROR/FATAL)
+_RCUTILS_ENV_VAR = "RCUTILS_LOGGING_MIN_SEVERITY_LEVEL"
+
 
 def configure_ros_logging(logging_cfg: Optional[LoggingCfg]) -> None:
-    """Apply ROS 2 log levels via ``rclpy.logging``.
+    """Apply ROS 2 log levels via ``rclpy.logging`` and env vars.
 
-    Sets the global rcutils root logger level (``ros_level``) and any
-    per-node overrides (``ros_overrides``).  No-ops gracefully when *rclpy*
-    is not initialised or not installed.
+    Two mechanisms are used so both the current process and any child
+    processes (parallel env workers, which fork/spawn after this call) see the
+    configured severity:
+
+    1. **Live rclpy call** — ``rclpy.logging.set_logger_level()`` affects rcutils
+       loggers that are already initialised in the current process.
+    2. **Environment variable** — sets ``RCUTILS_LOGGING_MIN_SEVERITY_LEVEL``
+       which rcutils reads when *initialising* a new logging context.  Forked /
+       spawned worker processes that call ``rclpy.init()`` internally will
+       therefore start at the configured level.
+
+    No-ops gracefully when *rclpy* is not initialised or not installed.
 
     Args:
         logging_cfg: ``LoggingCfg`` from ``arena_cfg.logging``, or None for
@@ -61,6 +73,16 @@ def configure_ros_logging(logging_cfg: Optional[LoggingCfg]) -> None:
         return
     if logging_cfg.ros_level is None and not logging_cfg.ros_overrides:
         return
+
+    ros_level = logging_cfg.ros_level  # e.g. "WARNING"
+
+    # ── 1. Propagate to child processes via environment variable ───────────
+    if ros_level is not None:
+        import os as _os
+        rcutils_token = _STDLIB_STR_TO_ROS_SEVERITY.get(ros_level, "INFO")
+        _os.environ[_RCUTILS_ENV_VAR] = rcutils_token
+
+    # ── 2. Apply to currently-initialised rclpy context ───────────────────
     try:
         import rclpy.logging as _ros_log
 
@@ -68,9 +90,9 @@ def configure_ros_logging(logging_cfg: Optional[LoggingCfg]) -> None:
             attr = _STDLIB_STR_TO_ROS_SEVERITY.get(key, "INFO")
             return getattr(_ros_log.LoggingSeverity, attr)
 
-        if logging_cfg.ros_level is not None:
+        if ros_level is not None:
             # Empty string "" is the rcutils global/root logger name.
-            _ros_log.set_logger_level("", _severity(logging_cfg.ros_level))
+            _ros_log.set_logger_level("", _severity(ros_level))
 
         for name, lvl_str in logging_cfg.ros_overrides.items():
             _ros_log.set_logger_level(name, _severity(lvl_str))
