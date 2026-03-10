@@ -3,8 +3,10 @@ import time
 from rclpy.node import Node
 from rclpy.time import Time  # Import Time for type hinting
 
+from rosnav_rl.model.dreamerv3.envs.wrappers import _GymDelegatingWrapper
 
-class TimeSyncWrapper(gym.Wrapper):
+
+class TimeSyncWrapper(_GymDelegatingWrapper):
     def __init__(self, env, control_hz: float = 10.0, warning_slop: float = 0.1):
         """
         A Gym Wrapper to synchronize step calls to a specific control frequency using ROS 2 time.
