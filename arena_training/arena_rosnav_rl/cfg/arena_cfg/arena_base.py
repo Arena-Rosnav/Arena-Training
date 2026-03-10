@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from .general import GeneralCfg
+from .logging import LoggingCfg
 from .monitor import MonitoringCfg
 from .profile import ProfilingCfg
 from .robot import RobotCfg
@@ -11,6 +12,7 @@ from .task import TaskCfg
 
 class ArenaBaseCfg(BaseModel):
     general: Optional[GeneralCfg] = GeneralCfg()
+    logging: Optional[LoggingCfg] = LoggingCfg()
     monitoring: Optional[MonitoringCfg] = MonitoringCfg()
     task: Optional[TaskCfg] = TaskCfg()
     profiling: Optional[ProfilingCfg] = None

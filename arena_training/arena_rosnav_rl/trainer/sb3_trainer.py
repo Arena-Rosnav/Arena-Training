@@ -122,16 +122,29 @@ class StableBaselines3Trainer(ArenaTrainer):
         """Sets up the training environment.
 
         This method performs the following steps:
-            1. Creates the necessary environments.
-            2. Sets up callbacks for the environment.
-            3. Completes the model initialization using the training environment.
+            1. Applies logging verbosity configuration.
+            2. Creates the necessary environments.
+            3. Sets up callbacks for the environment.
+            4. Completes the model initialization using the training environment.
 
         Returns:
             None
         """
+        self._configure_verbose(self.config.arena_cfg.general.verbose)
         self._create_environments()
         self._setup_callbacks(self.environment)
         self._complete_model_initialization(self.environment.train_env)
+
+    def _configure_verbose(self, verbose) -> None:
+        """Apply log levels for rosnav_rl namespaces and this trainer."""
+        from ..tools.log_utils import configure_trainer_logging
+        import logging as _logging
+
+        configure_trainer_logging(
+            logging_cfg=getattr(self.config.arena_cfg, "logging", None),
+            verbose=int(verbose),
+            trainer_logger=_logging.getLogger(__name__),
+        )
 
     def _create_environments(self) -> None:
         """Creates training and evaluation environments for the RL agent.

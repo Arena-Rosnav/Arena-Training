@@ -1,19 +1,24 @@
 import logging
 from dataclasses import dataclass, field
 from functools import partial
-from typing import List
+from typing import List, Optional
 
 import rosnav_rl
 import rosnav_rl.model.dreamerv3 as dreamerv3
-from rosnav_rl import SupportedRLFrameworks
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
+
+from rosnav_rl import SupportedRLFrameworks
 
 from ..tools.config import load_training_config
 from ..tools.env_utils import make_envs
 from ..tools.model_utils import setup_wandb
 from ..trainer.arena_trainer import ArenaTrainer
+from ...environments.wrappers import TimeSyncWrapper
 
 logger = logging.getLogger(__name__)
+
+# Logger used inside the DreamerV3 helper / tools modules
+_HELPER_LOGGER = logging.getLogger("rosnav_rl.model.dreamerv3.helper")
 
 
 @dataclass
@@ -49,6 +54,7 @@ class DreamerV3Trainer(ArenaTrainer):
     _framework = SupportedRLFrameworks.DREAMER_V3
     _config_type = arena_cfg.ArenaBaseCfg
     environment: DreamerV3Environment
+    _curriculum: Optional["DreamerV3Curriculum"] = None
 
     def __init__(self, config: arena_cfg.TrainingCfg):
         super().__init__(config, config.resume)
@@ -96,10 +102,20 @@ class DreamerV3Trainer(ArenaTrainer):
         wraps them in either Parallel (daemon) or Damy (debug) executors.
 
         Wrapper chain (innermost to outermost):
-            GazeboEnv -> WoTruncatedFlag -> TimeLimit -> SelectAction
-            -> UUID -> ResetWoInfo -> ChannelFirsttoLast
+            GazeboEnv -> TimeSyncWrapper -> WoTruncatedFlag -> TimeLimit
+            -> SelectAction -> UUID -> ResetWoInfo -> ChannelFirsttoLast
         """
         general_cfg = self.config.arena_cfg.general
+        self._configure_verbose(general_cfg.verbose)
+
+        logger.info(
+            "[Setup] Creating %d DreamerV3 environment(s) "
+            "(control_hz=%.1f, max_steps=%d, debug=%s)",
+            general_cfg.n_envs,
+            general_cfg.control_hz,
+            general_cfg.max_num_moves_per_eps,
+            general_cfg.debug_mode,
+        )
 
         train_env_fncs = make_envs(
             node=self.node if general_cfg.debug_mode else None,
@@ -110,6 +126,7 @@ class DreamerV3Trainer(ArenaTrainer):
             namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
             simulation_state_container=self.simulation_state_container,
             wrappers=[
+                partial(TimeSyncWrapper, control_hz=general_cfg.control_hz),
                 dreamerv3.WoTruncatedFlag,
                 partial(
                     dreamerv3.TimeLimit,
@@ -136,13 +153,63 @@ class DreamerV3Trainer(ArenaTrainer):
         self.environment = DreamerV3Environment(
             train_envs=train_envs, eval_envs=train_envs
         )
+        self._setup_curriculum()
+
+    def _setup_curriculum(self) -> None:
+        """Instantiate DreamerV3Curriculum from task config, if configured."""
+        from .dreamerv3_curriculum import DreamerV3Curriculum
+
+        self._curriculum = None
+        task_cfg = self.config.arena_cfg.task
+        if not task_cfg.has_curriculum():
+            return
+
+        general_cfg = self.config.arena_cfg.general
+        self._curriculum = DreamerV3Curriculum(
+            node=self.node,
+            staged_cfg=task_cfg.staged,
+            num_envs=general_cfg.n_envs,
+            verbose=int(general_cfg.verbose),
+        )
+        staged = task_cfg.staged
+        logger.info(
+            "[Setup] Curriculum learning enabled — %d stages, "
+            "threshold_type=%s, advance\u2265%.2f, retreat\u2264%.2f",
+            len(staged.curriculum_definition),
+            staged.threshold_type,
+            staged.upper_threshold,
+            staged.lower_threshold,
+        )
+
+    def _configure_verbose(self, verbose) -> None:
+        """Apply log levels for rosnav_rl namespaces and this trainer."""
+        from ..tools.log_utils import configure_trainer_logging
+
+        configure_trainer_logging(
+            logging_cfg=getattr(self.config.arena_cfg, "logging", None),
+            verbose=int(verbose),
+            framework_logger=_HELPER_LOGGER,
+            trainer_logger=logger,
+        )
 
     def _train_impl(self, *args, **kwargs):
         """Run the DreamerV3 training loop via the model's own train() method."""
+        fw_cfg = self.config.agent_cfg.framework
+        logger.info(
+            "[Train] Starting DreamerV3 training — "
+            "total_steps=%d  eval_every=%d  batch=%dx%d  device=%s",
+            fw_cfg.training.steps,
+            fw_cfg.training.eval_every,
+            fw_cfg.training.batch_size,
+            fw_cfg.training.batch_length,
+            fw_cfg.general.device,
+        )
         self.agent.model.train(
             train_envs=self.environment.train_envs,
             eval_envs=self.environment.eval_envs,
+            after_eval_fn=self._curriculum.after_eval_hook if self._curriculum else None,
         )
+        logger.info("[Train] Training complete.")
 
 
 if __name__ == "__main__":
