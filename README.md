@@ -27,8 +27,7 @@ The canonical way is through the Arena workspace tooling, which handles submodul
 ```bash
 cd ~/arena5_ws     # replace with your actual workspace path
 source arena
-arena update
-arena build
+arena feature training install
 ```
 
 ### Manual installation
@@ -141,11 +140,3 @@ ls $(ros2 pkg prefix arena_bringup)/share/arena_bringup/configs/training/
 - [`task_generator`](../task_generator) — dynamic task generation
 - [`arena_evaluation`](../arena_evaluation) — evaluation utilities
 - [`rosnav_rl`](deps/rosnav_rl) — core RL framework (submodule)
-
-## License
-
-MIT — see `LICENSE.md` in the Arena repository root.
-
-## Maintainer
-
-voshch <dev@voshch.dev>
