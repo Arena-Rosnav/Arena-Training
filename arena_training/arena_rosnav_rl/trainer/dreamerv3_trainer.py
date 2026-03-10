@@ -157,7 +157,7 @@ class DreamerV3Trainer(ArenaTrainer):
 
     def _setup_curriculum(self) -> None:
         """Instantiate DreamerV3Curriculum from task config, if configured."""
-        from .dreamerv3_curriculum import DreamerV3Curriculum
+        from ..dreamerv3.dreamerv3_curriculum import DreamerV3Curriculum
 
         self._curriculum = None
         task_cfg = self.config.arena_cfg.task

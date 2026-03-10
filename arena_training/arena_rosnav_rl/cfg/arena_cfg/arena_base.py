@@ -1,9 +1,9 @@
 from typing import Optional
 
 from pydantic import BaseModel, field_validator
+from rosnav_rl.cfg.logging import LoggingCfg 
 
 from .general import GeneralCfg
-from .logging import LoggingCfg
 from .monitor import MonitoringCfg
 from .profile import ProfilingCfg
 from .robot import RobotCfg

@@ -35,6 +35,52 @@ from rosnav_rl.cfg.logging import (
 )
 
 
+# Mapping: LoggingCfg string level → rclpy LoggingSeverity attribute name.
+# Kept as strings so that rclpy is imported lazily (not all users have it).
+_STDLIB_STR_TO_ROS_SEVERITY: dict = {
+    "DEBUG": "DEBUG",
+    "INFO": "INFO",
+    "WARNING": "WARN",
+    "ERROR": "ERROR",
+    "CRITICAL": "FATAL",
+}
+
+
+def configure_ros_logging(logging_cfg: Optional[LoggingCfg]) -> None:
+    """Apply ROS 2 log levels via ``rclpy.logging``.
+
+    Sets the global rcutils root logger level (``ros_level``) and any
+    per-node overrides (``ros_overrides``).  No-ops gracefully when *rclpy*
+    is not initialised or not installed.
+
+    Args:
+        logging_cfg: ``LoggingCfg`` from ``arena_cfg.logging``, or None for
+                     a no-op.
+    """
+    if logging_cfg is None:
+        return
+    if logging_cfg.ros_level is None and not logging_cfg.ros_overrides:
+        return
+    try:
+        import rclpy.logging as _ros_log
+
+        def _severity(key: str):
+            attr = _STDLIB_STR_TO_ROS_SEVERITY.get(key, "INFO")
+            return getattr(_ros_log.LoggingSeverity, attr)
+
+        if logging_cfg.ros_level is not None:
+            # Empty string "" is the rcutils global/root logger name.
+            _ros_log.set_logger_level("", _severity(logging_cfg.ros_level))
+
+        for name, lvl_str in logging_cfg.ros_overrides.items():
+            _ros_log.set_logger_level(name, _severity(lvl_str))
+
+    except Exception as exc:  # rclpy not available or context not initialised
+        logging.getLogger(__name__).debug(
+            "configure_ros_logging: skipped (%s)", exc
+        )
+
+
 def configure_trainer_logging(
     logging_cfg: Optional[LoggingCfg],
     verbose: int,
@@ -46,10 +92,11 @@ def configure_trainer_logging(
 
     1. Delegates to ``configure_rosnav_rl_logging`` for all ``rosnav_rl.*``
        namespaces and the ``ErrorCollector`` threshold.
-    2. Sets *framework_logger* to the level derived from *verbose* — useful
+    2. Applies ROS 2 system log levels via ``configure_ros_logging``.
+    3. Sets *framework_logger* to the level derived from *verbose* — useful
        for RL-framework helper/banner loggers that live outside ``rosnav_rl``
        but should match the user-visible verbosity intent.
-    3. Sets *trainer_logger* to at most that same level, so the trainer itself
+    4. Sets *trainer_logger* to at most that same level, so the trainer itself
        is never more verbose than the framework it wraps.
 
     Args:
@@ -61,6 +108,9 @@ def configure_trainer_logging(
     """
     # ── rosnav_rl namespaces + ErrorCollector ──────────────────────────────
     configure_rosnav_rl_logging(logging_cfg, verbose)
+
+    # ── ROS 2 system logging ───────────────────────────────────────────────
+    configure_ros_logging(logging_cfg)
 
     # ── Trainer / framework loggers (arena_training concern) ───────────────
     framework_level = VERBOSE_TO_LEVEL.get(
