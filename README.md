@@ -50,7 +50,28 @@ source install/setup.bash
 
 ## Usage
 
-### Training
+### Launching the full stack (recommended)
+
+The easiest way to start training is through `arena launch`. Providing `train_config` automatically implies `train_mode:=true` and launches `train_agent.py` in parallel with the simulation:
+
+```bash
+# Start simulation + training together (train_mode implied)
+arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
+    train_config:=/path/to/dreamer_training_config.yaml
+
+# Or with a config name resolved from arena_bringup/configs/training/
+arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
+    train_config:=dreamer_training_config.yaml
+
+# Start simulation only in train_mode (no trainer process)
+arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 train_mode:=true
+```
+
+> **Note:** `train_config` and `train_mode` are independent - `train_config` sets up the trainer process, while `train_mode` controls simulation behaviour (direct `cmd_vel` publishing, nav2 controller silenced). Providing `train_config` sets `train_mode` to `true` automatically.
+
+See [`arena_bringup`](../arena_bringup) for all available launch arguments. For agent, observation space, reward and curriculum configuration refer to the [rosnav_rl README](deps/rosnav_rl/README.md).
+
+### Training script (standalone)
 
 ```bash
 # Default config (sb_training_config.yaml)
