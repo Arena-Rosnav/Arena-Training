@@ -17,6 +17,7 @@ from rosnav_rl.states import SimulationStateContainer
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from std_srvs.srv import Empty as EmptySrv
+from std_srvs.srv import SetBool as SetBoolSrv
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
@@ -114,6 +115,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # ROS interfaces (initialised in _initialize_environment)
         self._reset_task_srv = None
+        self._pause_sim_srv = None
         self._cmd_vel_pub = None
         self._initialized = False
 
@@ -153,6 +155,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 f"Service '{task_srv_name}' not available after 10 seconds. "
                 f"Ensure the simulation and task_generator are running."
             )
+
+        pause_srv_name = (self.ns[0] / self.ns[1] / "pause_simulation").to_string()
+        self._pause_sim_srv = self.node.create_client(
+            SetBoolSrv,
+            pause_srv_name,
+            callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
+        )
+        if not self._pause_sim_srv.wait_for_service(timeout_sec=10.0):
+            self.node.get_logger().warn(
+                f"Service '{pause_srv_name}' not available after 10 seconds. "
+                f"Simulation pause/unpause will be disabled."
+            )
+            self._pause_sim_srv = None
 
         # Direct cmd_vel publisher — the sole source of velocity commands
         # during training.  Completely bypasses the nav2 controller_server.
@@ -352,6 +367,22 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.node.destroy_publisher(self._cmd_vel_pub)
         if getattr(self, "_reset_task_srv", None):
             self._reset_task_srv.destroy()
+        if getattr(self, "_pause_sim_srv", None):
+            self._pause_sim_srv.destroy()
+
+    def pause(self, paused: bool) -> None:
+        """Pause (paused=True) or unpause (paused=False) the physics simulator.
+
+        Routes through the task-generator node so that ownership of the
+        simulator API stays in one place.  The call is fire-and-forget:
+        Gazebo processes it within ~1 ms on localhost, well before any
+        significant neural-network computation begins.
+        """
+        if not getattr(self, "_pause_sim_srv", None):
+            return
+        req = SetBoolSrv.Request()
+        req.data = paused
+        self._pause_sim_srv.call_async(req)
 
     def reset_task(self, timeout: float = 10.0, retries: int = 2):
         """Call the task-generator's reset_task service and **block** until it
