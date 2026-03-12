@@ -43,8 +43,8 @@ uv sync
 
 # 3. Build ROS 2 packages
 cd /path/to/arena5_ws
-colcon build --packages-up-to arena_training
-source install/setup.bash
+arena build
+source arena
 ```
 
 ## Usage
@@ -58,7 +58,7 @@ The easiest way to start training is through `arena launch`. Providing `train_co
 arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
     train_config:=/path/to/dreamer_training_config.yaml
 
-# Or with a config name resolved from arena_bringup/configs/training/
+# Or with a config name - resolved from arena_training/configs/
 arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
     train_config:=dreamer_training_config.yaml
 
@@ -85,14 +85,13 @@ ros2 run arena_training train_agent --config /path/to/my_config.yaml
 
 Training metrics are logged to **Weights & Biases** automatically. Trained agents are saved to `agents/<agent_name>/` (`training_config.yaml` + `best_model.zip`).
 
-### Available training configs (`arena_bringup/configs/training/`)
+### Available training configs (`arena_training/configs/`)
 
 | File | Description |
 |---|---|
-| `sb_training_config.yaml` | Stable Baselines3 (default) |
-| `dreamer_training_config.yaml` | DreamerV3 |
-| `semantic_training_config.yaml` | Semantic observations |
-| `unity_rgbd_training_config.yaml` | Unity RGB-D |
+| `sb_training_config.yaml` | Stable Baselines3 — PPO / SAC / TD3 (default) |
+| `dreamer_training_config.yaml` | DreamerV3 model-based RL |
+| `observations/observations.yaml` | Observation space definitions |
 
 ### Deployment
 
