@@ -1,0 +1,192 @@
+# CONTAINS THE AGENT CONFIGURATION FOR TRAINING [STABLE BASELINES 3 - PPO - TEMPLATE]
+# Controls whether to continue training from a previous checkpoint
+resume: false
+
+agent_cfg:
+  name: null  # agent name (should be unique) - used for model identification
+
+  # action space configuration
+  action_space:
+    is_discrete: false  # false for continuous actions, true for discrete actions
+    custom_discretization: null  # optional custom discretization schema for action space
+
+  framework:
+    name: stable_baselines3  # ML framework name used for training
+    algorithm: # training algorithm configuration
+      type: PPO  # discriminator tag — PPO | A2C | TRPO | SAC | TD3 | TQC | CrossQ | generic
+      architecture_name: AGENT_3  # neural network architecture identifier
+      checkpoint: last_model  # checkpoint to load when resuming training (last_model or best_model)
+      # transfer_weights:  # for transfer learning - uncomment to use
+      #   source_dir: /home/tar/catkin_ws/src/planners/rosnav/agents/AGENT_5
+      #   source_checkpoint: best_model
+      #   include:  # regex patterns for layers to include
+      #     - .*
+      #   exclude: null  # regex patterns for layers to exclude
+      parameters:
+        batch_size: 256  # Number of samples per gradient update (per environment)
+        clip_range: 0.2  # Clipping parameter for PPO (limits policy update size)
+        clip_range_vf: null  # Clipping parameter for value function (if None, no clipping)
+        device: cuda  # Device to use for training (cpu, cuda, auto)
+        ent_coef: 0.0  # Entropy coefficient for the loss calculation - higher values encourage exploration
+        gae_lambda: 0.95  # Lambda for generalized advantage estimation - balances bias vs. variance
+        gamma: 0.99  # Discount factor for future rewards (0-1)
+        learning_rate:  # Learning rate schedule configuration
+          type: linear  # Type of learning rate schedule (linear, constant, etc.)
+          kwargs:
+            initial_value: 0.001  # Initial learning rate at start of training
+            final_value: 0.0001  # Final learning rate at end of training
+        max_grad_norm: 0.5  # Maximum norm for gradient clipping (prevents exploding gradients)
+        n_epochs: 5  # Number of epochs to update the policy for each batch
+        n_steps: null  # Number of steps to run for each environment per update (if null, uses default)
+        normalize_advantage: true  # Whether to normalize advantages (stabilizes training)
+        sde_sample_freq: -1  # Frequency of sampling for state-dependent exploration (if -1, no sampling)
+        seed: null  # Seed for the random number generator (for reproducibility)
+        stats_window_size: 100  # Window size for the rolling statistics in evaluation
+        target_kl: 1.0  # Target KL divergence threshold (early stops policy updates if exceeded)
+        tensorboard_log: null  # Directory for tensorboard logs (if None, no tensorboard logging)
+        total_batch_size: 512  # Total batch size for training (across all environments; 192 × 3)
+        use_sde: false  # Whether to use state-dependent exploration for action sampling
+        verbose: 2  # Verbosity level (0: no output, 1: info, 2: debug)
+        vf_coef: 0.22  # Coefficient for the value function loss in the total loss
+      transfer_weights: null  # Alternative way to specify transfer learning configuration
+    normalization: null  # Input normalization parameters (if needed)
+
+  # reward function configuration
+  reward:
+    reward_unit_kwargs: null  # Additional arguments for reward units
+    verbose: 1
+
+
+    # Comprehensive test configuration for most reward units
+    reward_function_dict:
+      goal_reached:
+        reward: 20
+        # _follow_subgoal must stay false: the robot reaches the actual nav2 goal,
+        # not the nearest subgoal (which is only min_lookahead_dist=2m away).
+        _follow_subgoal: false
+      safe_distance:
+        reward: -0.1
+      factored_safe_distance:
+        factor: -0.2
+      approach_goal:
+        pos_factor: 0.3
+        neg_factor: 0.4
+        _goal_update_threshold: 0.25
+        # _follow_subgoal: true — use the subgoal (proximal DRL controller waypoint)
+        # as the dense shaping target. The subgoal is fixed between controller updates
+        # (5 Hz), giving meaningful approach reward per step. The world-frame jump
+        # detection skips steps when the subgoal advances, preventing spurious reward.
+        # goal_reached terminates on the actual nav2 goal regardless.
+        _follow_subgoal: true
+        _on_safe_dist_violation: true
+      collision:
+        reward: -15
+
+# CONTAINS THE FRAMEWORK CONFIGURATION FOR TRAINING 
+arena_cfg:
+  # general training configuration
+  general:
+    # in debug_mode no agent directories will be created and no models will be saved
+    # further no wandb logging and fake (simulated) multiprocessing for traceback
+    debug_mode: false  # Enable debugging features (no saving, no wandb, simplified multiprocessing)
+    goal_radius: 0.5  # Radius within which the goal is considered reached
+    max_num_moves_per_eps: 600  # Maximum number of steps per episode before termination
+    n_envs: 2  # Number of parallel training environments
+    n_timesteps: 4000000  # Total number of timesteps to train for
+    no_gpu: true  # Set to true to force CPU training even if GPU is available
+    safety_distance: 1.0  # Minimum distance to maintain from obstacles for safety
+    show_progress_bar: false  # Display progress bar during training
+    control_hz: 10.0  # Control frequency in Hz (wall-clock rate ≈ sim_realtime_factor × control_hz)
+    observations_config: observations/observations.yaml  # relative to this config file's directory
+
+  # Logging levels for rosnav_rl subsystems and this trainer
+  # default_level applies to the entire rosnav_rl.* namespace;
+  # overrides silence noisy per-step subsystems.
+  logging:
+    default_level: INFO          # rosnav_rl root level
+    overrides:
+      rosnav_rl.observations: WARNING   # silence per-step obs noise
+      rosnav_rl.reward: WARNING          # silence per-step reward breakdown
+      rosnav_rl.spaces: WARNING          # silence space auto-load info
+    ros_level: WARNING  # ROS 2 root logger (rcutils); equivalent to --log-level warn
+    ros_overrides: {}  # per-node overrides, e.g. Arena_Trainer: INFO
+
+  # task modules configuration
+  task:
+    tm_modules: staged  # Task module setup (staged for curriculum learning)
+    tm_obstacles: random  # Obstacle generation method (random placement)
+    tm_robots: random  # Robot spawning method (random positions)
+
+    staged:
+      starting_stage: 1
+      threshold_type: succ  # Metric to use: "succ" (success rate) or "rew" (reward)
+      upper_threshold: 0.9  # Performance threshold to advance to next stage
+      lower_threshold: 0.3  # Performance threshold to stay at current stage
+
+      parameter_node_template: "/task_generator_node/env{i}"  # Template for task generator node name
+      timeout: 5.0  # Timeout for ROS2 parameter service calls (seconds)
+      curriculum_definition:
+        # Stage 1: No obstacles (safe start)
+        - task.random.static.n: [0, 0]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [0, 0]
+          task.random.static.models: []
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 1.5
+
+        # Stage 2: Few static obstacles
+        - task.random.static.n: [2, 4]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [0, 0]
+          task.random.static.models: [Residential/Wood_Chair, Residential/Steel_Table]
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 1.2
+
+        # Stage 3: More static obstacles
+        - task.random.static.n: [3, 5]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [0, 0]
+          task.random.static.models: [Residential/Wood_Chair, Residential/Steel_Table, Residential/Trashcan]
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 1.0
+
+        # Stage 4: More static obstacles + larger variety
+        - task.random.static.n: [4, 7]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [0, 0]
+          task.random.static.models: [Residential/Wood_Chair, Residential/Steel_Table, Residential/Trashcan, Residential/Sofa, Residential/Coffee_Table_A]
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 0.8
+
+  monitoring:
+    wandb: # Weights and Biases logging configuration
+      enabled: false  # Set to true to enable W&B logging (ignored in debug_mode)
+      project_name: Arena-RL  # W&B project name
+      group: null  # Group name for experiments (null for no grouping)
+      run_name: null  # Run name (null for auto-generated)
+      tags: null  # Tags for experiment organization
+    episode_logging:  # Statistics logging during episodes
+      last_n_episodes: 25  # Number of episodes to consider for rolling statistics
+      record_actions: true  # Whether to record agent actions
+    eval_metrics: false  # Save detailed evaluation statistics during training
+    training_metrics: true  # Display training performance metrics
+
+  callbacks:
+    periodic_evaluation:
+      eval_freq: 100000  # Evaluation frequency (in timesteps * n_envs)
+      max_num_moves_per_eps: 1200  # Maximum steps per evaluation episode
+      n_eval_episodes: 20  # Number of episodes to evaluate on
+    stop_training_on_threshold:
+      threshold: 0.9  # Performance threshold to stop training
+      threshold_type: succ  # Metric to use: "succ" (success rate) or "rew" (reward)
+      verbose: 1  # Verbosity of logging when checking threshold
+
+  profiling: null  # Performance profiling configuration (null for disabled)
+
+# one should be able to turn off monitoring 
+# profiler
+# we shouldnt start double as many processes for our gym environments as necessary (currently 3 envs means 6 processes due to train envs and eval envs having their one seperate process)
