@@ -33,13 +33,13 @@ arena feature training install
 ### Manual installation
 
 ```bash
-# 1. Initialize the rosnav_rl submodule
+# 1. Initialize the rosnav_rl submodule (shallow clone to avoid fetching large history)
 cd /path/to/arena5_ws/src/Arena/arena_training
-git submodule update --init --recursive
+git submodule update --init --depth 1 deps/rosnav_rl
 
-# 2. Install Python dependencies (uses uv)
+# 2. Install Python dependencies into the Arena venv
 cd /path/to/arena5_ws/src/Arena
-uv sync
+uv pip install -e arena_training -e arena_training/deps/rosnav_rl/rosnav_rl
 
 # 3. Build ROS 2 packages
 cd /path/to/arena5_ws
@@ -76,12 +76,17 @@ See [`arena_bringup`](../arena_bringup) for all available launch arguments. For 
 # Default config (sb_training_config.yaml)
 ros2 run arena_training train_agent
 
-# Specific config by name — resolved from arena_bringup/configs/training/
+# Specific config by name — resolved from arena_training/configs/
 ros2 run arena_training train_agent --config dreamer_training_config.yaml
 
 # Absolute path
 ros2 run arena_training train_agent --config /path/to/my_config.yaml
 ```
+
+Config resolution order:
+1. Absolute path — used directly
+2. Relative path from current working directory
+3. Name only — looked up in `arena_training/configs/`
 
 Training metrics are logged to **Weights & Biases** automatically. Trained agents are saved to `agents/<agent_name>/` (`training_config.yaml` + `best_model.zip`).
 
@@ -92,6 +97,14 @@ Training metrics are logged to **Weights & Biases** automatically. Trained agent
 | `sb_training_config.yaml` | Stable Baselines3 — PPO / SAC / TD3 (default) |
 | `dreamer_training_config.yaml` | DreamerV3 model-based RL |
 | `observations/observations.yaml` | Observation space definitions |
+
+### Agent output directory
+
+Trained agents (` training_config.yaml` + `best_model.zip`) are saved under `arena_training/agents/<agent_name>/`. Resolution order:
+
+1. `agents_dir` field in the training config YAML (highest priority)
+2. `ROSNAV_AGENTS_DIR` environment variable
+3. Default: `arena_training/agents/`
 
 ### Deployment
 
@@ -122,15 +135,18 @@ agent_cfg:       # rosnav_rl agent: framework, observation spaces, action space
 
 **`rosnav_rl` not found**
 ```bash
-cd arena_training && git submodule update --init --recursive
-cd /path/to/arena5_ws/src/Arena && uv sync
+cd /path/to/arena5_ws/src/Arena/arena_training
+git submodule update --init --depth 1 deps/rosnav_rl
+cd /path/to/arena5_ws/src/Arena
+uv pip install -e arena_training -e arena_training/deps/rosnav_rl/rosnav_rl
 ```
 
 **Config file not found**
 ```bash
-# Verify arena_bringup is installed and the file exists
-ls $(ros2 pkg prefix arena_bringup)/share/arena_bringup/configs/training/
+# Configs ship with arena_training — list available ones:
+ls /path/to/arena5_ws/src/Arena/arena_training/configs/
 ```
+Pass the file name only (e.g. `dreamer_training_config.yaml`) and it will be found automatically, or supply an absolute path.
 
 ## Related Packages
 
