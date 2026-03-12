@@ -1,12 +1,10 @@
-from ament_index_python.packages import get_package_share_directory
+from pathlib import Path
 
-
-class ROS_PACKAGES:
-    ARENA_BRINGUP = get_package_share_directory("arena_bringup")
+_ARENA_TRAINING_ROOT = Path(__file__).resolve().parents[3]  # …/Arena/arena_training
 
 
 class TRAINING_CONSTANTS:
     class PATHS:
         TRAINING_CONFIGS = (
-            lambda config_name: f"{ROS_PACKAGES.ARENA_BRINGUP}/configs/training/{config_name}.yaml"
+            lambda config_name: str(_ARENA_TRAINING_ROOT / "configs" / f"{config_name}.yaml")
         )

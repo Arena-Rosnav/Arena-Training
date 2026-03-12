@@ -266,7 +266,8 @@ class StableBaselines3Trainer(ArenaTrainer):
 
 def main():
     rclpy.init()
-    config = load_training_config("/home/le/arena5_ws/src/Arena/arena_bringup/configs/training/sb_training_config.yaml")
+    _config_path = Path(__file__).resolve().parents[3] / "configs" / "sb_training_config.yaml"
+    config = load_training_config(str(_config_path))
 
     trainer = StableBaselines3Trainer(config)
 

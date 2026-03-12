@@ -12,6 +12,7 @@ Usage:
 """
 
 import logging
+from pathlib import Path
 import numpy as np
 import yaml
 import rclpy
@@ -50,8 +51,9 @@ def test_observation_manager():
     try:
         # Load observation configuration
         obs_config_path = (
-            "/home/le/arena5_ws/src/Arena/arena_training/deps/rosnav_rl/rosnav_rl/"
-            "rosnav_rl/observations/observations.yaml"
+            Path(__file__).resolve().parents[1]
+            / "deps" / "rosnav_rl" / "rosnav_rl"
+            / "rosnav_rl" / "observations" / "observations.yaml"
         )
 
         logger.info(f"Loading observation config from: {obs_config_path}")
@@ -113,8 +115,9 @@ def test_multi_environment_observations(num_envs=2, num_samples=5):
     try:
         # Load observation configuration
         obs_config_path = (
-            "/home/le/arena5_ws/src/Arena/arena_training/deps/rosnav_rl/rosnav_rl/"
-            "rosnav_rl/observations/observations.yaml"
+            Path(__file__).resolve().parents[1]
+            / "deps" / "rosnav_rl" / "rosnav_rl"
+            / "rosnav_rl" / "observations" / "observations.yaml"
         )
 
         logger.info(f"Loading observation config from: {obs_config_path}")
@@ -231,7 +234,9 @@ def test_rl_agent_and_env(num_envs=1, use_multiproc=True):
 
         # Load agent configuration
         logger.info("Loading agent configuration...")
-        agent_config_path = "/home/le/arena5_ws/src/Arena/arena_bringup/configs/training/sb_training_config.yaml"
+        agent_config_path = (
+            Path(__file__).resolve().parents[1] / "configs" / "sb_training_config.yaml"
+        )
 
         with open(agent_config_path, "r") as f:
             training_config = yaml.safe_load(f)

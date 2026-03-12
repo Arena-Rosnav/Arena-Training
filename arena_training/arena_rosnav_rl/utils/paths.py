@@ -35,7 +35,6 @@ class RosPackages:
     # TODO: Consider using a more dynamic approach to fetch package paths
     SIMULATION_SETUP: Path = Path(get_package_share_directory("arena_simulation_setup"))
     ARENA_TRAINING: Path = _ARENA_TRAINING_ROOT  # source tree root, not install
-    ARENA_BRINGUP: Path = Path(get_package_share_directory("arena_bringup"))
 
 
 class PathComponent(ABC):
@@ -104,7 +103,7 @@ class ConfigComponent(PathComponent):
 
     def __init__(self, file_name: str = ""):
         self.file_name = file_name
-        self._base = RosPackages.ARENA_BRINGUP / "configs" / "training"
+        self._base = _ARENA_TRAINING_ROOT / "configs"
 
     @cached_property
     def path(self) -> Path:
