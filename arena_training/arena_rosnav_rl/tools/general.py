@@ -116,7 +116,10 @@ def get_robot_yaml_path() -> str:
 def setup_paths_dictionary(
     trainer: "ArenaTrainer", is_debug_mode: bool = False
 ) -> PathDictionary:
-    trainer.paths = PathFactory.get_paths(trainer.config.agent_cfg.name)
+    agents_dir = trainer.config.resolved_agents_dir
+    trainer.paths = PathFactory.get_paths(
+        trainer.config.agent_cfg.name, agents_dir=agents_dir
+    )
     if not is_debug_mode:
         trainer.paths.create_all()
 

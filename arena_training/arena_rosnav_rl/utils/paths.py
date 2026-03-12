@@ -60,9 +60,9 @@ class PathComponent(ABC):
 class AgentComponent(PathComponent):
     """Base class for agent-related paths"""
 
-    def __init__(self, agent_name: str):
+    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
         self.agent_name = agent_name
-        self._base = _ARENA_TRAINING_ROOT / "agents" / agent_name
+        self._base = (agents_dir or _ARENA_TRAINING_ROOT / "agents") / agent_name
 
 
 class Agent(AgentComponent):
@@ -76,8 +76,8 @@ class Agent(AgentComponent):
 class AgentLogs(AgentComponent):
     """Base class for agent log paths"""
 
-    def __init__(self, agent_name: str, log_type: str):
-        super().__init__(agent_name)
+    def __init__(self, agent_name: str, log_type: str, agents_dir: Optional[Path] = None):
+        super().__init__(agent_name, agents_dir=agents_dir)
         self.log_type = log_type
 
     @cached_property
@@ -88,15 +88,15 @@ class AgentLogs(AgentComponent):
 class AgentTensorboard(AgentLogs):
     """Agent tensorboard logs"""
 
-    def __init__(self, agent_name: str):
-        super().__init__(agent_name, "training")
+    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
+        super().__init__(agent_name, "training", agents_dir=agents_dir)
 
 
 class AgentEval(AgentLogs):
     """Agent evaluation logs"""
 
-    def __init__(self, agent_name: str):
-        super().__init__(agent_name, "eval")
+    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
+        super().__init__(agent_name, "eval", agents_dir=agents_dir)
 
 
 class ConfigComponent(PathComponent):
@@ -160,16 +160,25 @@ class PathDictionary(dict):
 class PathFactory:
     """Factory class to create path instances"""
 
+    DEFAULT_AGENTS_DIR: Path = _ARENA_TRAINING_ROOT / "agents"
+
     @staticmethod
     def get_paths(
         agent_name: str,
+        agents_dir: Optional[Path] = None,
     ) -> Dict[Type[PathComponent], PathComponent]:
-        """Generate all required paths for the agent"""
+        """Generate all required paths for the agent.
+
+        Args:
+            agent_name: Name of the agent.
+            agents_dir: Custom base directory for agent artifacts.
+                        If *None*, falls back to ``_ARENA_TRAINING_ROOT / "agents"``.
+        """
         return PathDictionary(
             {
-                Agent: Agent(agent_name),
-                AgentTensorboard: AgentTensorboard(agent_name),
-                AgentEval: AgentEval(agent_name),
+                Agent: Agent(agent_name, agents_dir=agents_dir),
+                AgentTensorboard: AgentTensorboard(agent_name, agents_dir=agents_dir),
+                AgentEval: AgentEval(agent_name, agents_dir=agents_dir),
                 RobotSetting: RobotSetting(),
                 ConfigComponent: ConfigComponent(),
             }

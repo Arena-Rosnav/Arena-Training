@@ -1,7 +1,9 @@
-from typing import Union
+import os
+from pathlib import Path
+from typing import Optional, Union
 
 import rosnav_rl
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..cfg.arena_cfg.robot import DiscreteAction
 from ..utils.type_alias.observation import CustomDiscreteActionList
@@ -16,10 +18,36 @@ class TrainingCfg(BaseModel):
     agent_cfg: rosnav_rl.AgentCfg
     resume: bool = False
 
+    agents_dir: Optional[Path] = Field(
+        None,
+        description=(
+            "Custom base directory for agent artifacts. "
+            "Resolution order: this field → ROSNAV_AGENTS_DIR env var → default."
+        ),
+    )
+
     model_config = ConfigDict(
         extra="forbid",  # Reject extra fields
         arbitrary_types_allowed=True,  # Allow custom types
     )
+
+    @property
+    def resolved_agents_dir(self) -> Optional[Path]:
+        """Resolve the agents directory with a 3-level fallback chain.
+
+        Priority:
+            1. Explicit ``agents_dir`` in this config (highest).
+            2. ``ROSNAV_AGENTS_DIR`` environment variable.
+            3. ``None`` → PathFactory uses its built-in default.
+        """
+        if self.agents_dir is not None:
+            return Path(self.agents_dir).expanduser().resolve()
+
+        env_dir = os.environ.get("ROSNAV_AGENTS_DIR")
+        if env_dir:
+            return Path(env_dir).expanduser().resolve()
+
+        return None  # let PathFactory use its default
 
     # TODO: Maybe move this to a more general place - closer to the RobotCfg
     @model_validator(mode="after")
