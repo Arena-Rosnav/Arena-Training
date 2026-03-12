@@ -16,9 +16,7 @@
 
   <build_depend>rclpy</build_depend>
   <exec_depend>rclpy</exec_depend>
-
-  <!-- Arena dependencies -->
-  <depend>rosnav_rl</depend>
+  <exec_depend>rosnav_rl</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

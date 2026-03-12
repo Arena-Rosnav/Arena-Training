@@ -45,7 +45,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-find_package(rosnav_rl REQUIRED)
 
 # Python package installation
 ament_python_install_package(${PROJECT_NAME} SCRIPTS_DESTINATION lib/${PROJECT_NAME})
