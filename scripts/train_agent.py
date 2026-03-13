@@ -13,7 +13,6 @@ Usage:
     python3 train_agent.py --config /path/to/config.yaml
 """
 
-import os
 import sys
 import logging
 import threading
@@ -24,17 +23,11 @@ import rclpy
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 
-# Import rosnav_rl type aliases
-import rosnav_rl.utils.type_aliases as type_aliases
-
 # Import arena_training subpackages
 from arena_training.arena_rosnav_rl.cfg import TrainingCfg
 from arena_training.arena_rosnav_rl.tools.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.tools.config import load_training_config
-from arena_training.arena_rosnav_rl.trainer import (
-    DreamerV3Trainer,
-    StableBaselines3Trainer,
-)
+from arena_training.arena_rosnav_rl.trainer import get_trainer
 
 # Configure logging
 logging.basicConfig(
@@ -88,34 +81,6 @@ def wait_for_simulation(timeout: float = 120.0) -> bool:
             "Proceeding anyway — the simulation may not be fully loaded."
         )
     return received
-
-
-def get_trainer(config: TrainingCfg):
-    """
-    Create and return the appropriate trainer based on the framework specified in config.
-
-    Args:
-        config (TrainingCfg): The training configuration containing framework specification
-
-    Returns:
-        ArenaTrainer: An instance of the appropriate trainer (DreamerV3 or StableBaselines3)
-
-    Raises:
-        ValueError: If the specified framework is not supported
-    """
-    framework = config.agent_cfg.framework.name
-
-    logger.info(f"Initializing trainer for framework: {framework}")
-
-    if framework == type_aliases.SupportedRLFrameworks.DREAMER_V3.value:
-        return DreamerV3Trainer(config)
-    elif framework == type_aliases.SupportedRLFrameworks.STABLE_BASELINES3.value:
-        return StableBaselines3Trainer(config)
-    else:
-        supported = [f.value for f in type_aliases.SupportedRLFrameworks]
-        raise ValueError(
-            f"Unsupported framework: {framework}. " f"Supported frameworks: {supported}"
-        )
 
 
 def get_config_path(args) -> Path:
@@ -233,7 +198,7 @@ def main():
         # Validate environment
         validate_environment()
 
-         # Wait for the simulation to be fully loaded before proceeding
+        # Wait for the simulation to be fully loaded before proceeding
         wait_for_simulation(timeout=120.0)
 
         # Get the full path to the configuration file
@@ -251,6 +216,7 @@ def main():
         logger.info("Configuration loaded successfully")
 
         # Create the appropriate trainer based on the framework
+        logger.info("Initializing trainer for framework: %s", config.agent_cfg.framework.name)
         trainer = get_trainer(config)
 
         # Start training

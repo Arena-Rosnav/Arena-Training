@@ -181,7 +181,22 @@ def _make_dreamerv3_trainer(training_cfg, pruner):
 
 def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
     """Return an Optuna objective function that runs one full trial."""
+    from rosnav_rl import SupportedRLFrameworks
     from rosnav_rl.tuning import apply_params, suggest_params, SB3TrialPruner, DreamerV3TrialPruner
+
+    # Maps each supported framework to (pruner_factory, trainer_factory).
+    # pruner_factory(trial) → framework-specific TrialPruner
+    # trainer_factory(training_cfg, pruner) → ArenaTrainer subclass
+    _tuning_registry = {
+        SupportedRLFrameworks.STABLE_BASELINES3: (
+            lambda trial: SB3TrialPruner(trial, metric=tuning_cfg.metric, verbose=1),
+            _make_sb3_trainer,
+        ),
+        SupportedRLFrameworks.DREAMER_V3: (
+            lambda trial: DreamerV3TrialPruner(trial, verbose=1),
+            _make_dreamerv3_trainer,
+        ),
+    }
 
     def objective(trial):
         import optuna
@@ -206,18 +221,15 @@ def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
         training_cfg = TrainingCfg.model_validate(trial_config)
 
         # \u2500\u2500 4. Build pruner and framework-specific trainer \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        from rosnav_rl import SupportedRLFrameworks
-
         framework = SupportedRLFrameworks(training_cfg.agent_cfg.framework.name)
-
-        if framework == SupportedRLFrameworks.STABLE_BASELINES3:
-            pruner = SB3TrialPruner(trial, metric=tuning_cfg.metric, verbose=1)
-            trainer = _make_sb3_trainer(training_cfg, pruner)
-        elif framework == SupportedRLFrameworks.DREAMER_V3:
-            pruner = DreamerV3TrialPruner(trial, verbose=1)
-            trainer = _make_dreamerv3_trainer(training_cfg, pruner)
-        else:
-            raise ValueError(f"Unsupported framework for tuning: {framework!r}")
+        if framework not in _tuning_registry:
+            raise ValueError(
+                f"Unsupported framework for tuning: {framework!r}. "
+                f"Supported: {[f.value for f in _tuning_registry]}"
+            )
+        make_pruner, make_trainer = _tuning_registry[framework]
+        pruner = make_pruner(trial)
+        trainer = make_trainer(training_cfg, pruner)
 
         # \u2500\u2500 5. Run training \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         try:
@@ -302,7 +314,7 @@ def main() -> int:
     logger.info("  Params:    %s", list(tuning_cfg.search_space.keys()))
     logger.info("=" * 70)
 
-    objective = make_objective(tuning_cfg, base_config_dict, args.config)
+    objective = make_objective(tuning_cfg, base_config_dict)
     study.optimize(objective, n_trials=tuning_cfg.n_trials)
 
     logger.info("\n" + "=" * 70)
