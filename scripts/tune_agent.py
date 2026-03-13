@@ -181,9 +181,7 @@ def _make_dreamerv3_trainer(training_cfg, pruner):
 
 def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
     """Return an Optuna objective function that runs one full trial."""
-    from rosnav_rl.tuning import apply_params, suggest_params
-    from rosnav_rl.tuning.sb3_pruner import SB3TrialPruner
-    from rosnav_rl.tuning.dreamerv3_pruner import DreamerV3TrialPruner
+    from rosnav_rl.tuning import apply_params, suggest_params, SB3TrialPruner, DreamerV3TrialPruner
 
     def objective(trial):
         import optuna
