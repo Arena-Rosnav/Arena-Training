@@ -16,10 +16,13 @@ Usage:
 import os
 import sys
 import logging
+import threading
 from pathlib import Path
 
 import torch
 import rclpy
+from rclpy.node import Node
+from rosgraph_msgs.msg import Clock
 
 # Import rosnav_rl type aliases
 import rosnav_rl.utils.type_aliases as type_aliases
@@ -42,6 +45,49 @@ logger = logging.getLogger(__name__)
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
 # torch._dynamo.config.disable = True
+
+
+def wait_for_simulation(timeout: float = 120.0) -> bool:
+    """Block until the simulation is fully loaded.
+
+    Waits for the first message on ``/clock`` which Gazebo (and other
+    simulators) only starts publishing once the physics engine is ready.
+
+    Args:
+        timeout: Maximum seconds to wait before giving up.
+
+    Returns:
+        ``True`` if the clock was received, ``False`` on timeout.
+    """
+    logger.info("Waiting for simulation (listening for /clock)...")
+    event = threading.Event()
+
+    node = Node("_wait_for_sim")
+
+    def _cb(msg: Clock):
+        event.set()
+
+    sub = node.create_subscription(Clock, "/clock", _cb, 1)
+
+    # Spin in a background thread so the subscription can receive
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+
+    received = event.wait(timeout=timeout)
+
+    executor.shutdown()
+    node.destroy_node()
+
+    if received:
+        logger.info("Simulation is ready (/clock received).")
+    else:
+        logger.warning(
+            f"Timed out after {timeout}s waiting for /clock. "
+            "Proceeding anyway — the simulation may not be fully loaded."
+        )
+    return received
 
 
 def get_trainer(config: TrainingCfg):
@@ -108,18 +154,36 @@ def get_config_path(args) -> Path:
         )
         return config_path.absolute()
 
-    # Look in source tree (works without a built/sourced workspace)
-    source_configs = Path(__file__).resolve().parents[1] / "configs"
-    source_path = source_configs / config_file
-    if source_path.exists():
-        logger.info(f"Using config file: {source_path}")
-        return source_path
+    # Try to find the config in the arena_bringup package
+    from ament_index_python.packages import get_package_share_directory
 
-    available = sorted(source_configs.glob("*.yaml")) if source_configs.exists() else []
-    avail_str = "\n  - ".join(p.name for p in available) if available else "(none found)"
+    try:
+        arena_bringup_dir = get_package_share_directory("arena_bringup")
+        package_config_path = (
+            Path(arena_bringup_dir) / "configs" / "training" / config_file
+        )
+
+        if package_config_path.exists():
+            logger.info(f"Using config file from arena_bringup: {package_config_path}")
+            return package_config_path
+        else:
+            logger.warning(f"Config file not found at {package_config_path}")
+    except Exception as e:
+        logger.warning(f"Could not locate arena_bringup package: {e}")
+
+    # Last resort: try relative to script directory
+    script_dir = Path(__file__).parent.parent
+    fallback_path = script_dir / "configs" / config_file
+    if fallback_path.exists():
+        logger.info(f"Using config file from script directory: {fallback_path}")
+        return fallback_path
+
     raise FileNotFoundError(
-        f"Config file '{config_file}' not found.\n"
-        f"Available configs in {source_configs}:\n  - {avail_str}"
+        f"Config file '{config_file}' not found in:\n"
+        f"  - Current directory\n"
+        f"  - arena_bringup package configs\n"
+        f"  - Script directory configs\n"
+        f"Please provide an absolute path or ensure the file exists in one of these locations."
     )
 
 
@@ -168,6 +232,9 @@ def main():
 
         # Validate environment
         validate_environment()
+
+         # Wait for the simulation to be fully loaded before proceeding
+        wait_for_simulation(timeout=120.0)
 
         # Get the full path to the configuration file
         config_path = get_config_path(args)
