@@ -8,9 +8,9 @@ from ..cfg import sb3_cfg as arena_cfg
 from ..utils import paths as Paths
 from ...environments.wrappers import TimeSyncWrapper
 from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
-from ..tools.config import load_training_config
-from ..tools.env_utils import make_envs, sb3_wrap_env
-from ..tools.model_utils import setup_wandb
+from ..utils.config import load_training_config
+from ..utils.env_factory import make_envs, sb3_wrap_env
+from ..utils.monitoring import setup_wandb
 from .arena_trainer import (
     ArenaTrainer,
     SupportedRLFrameworks,
@@ -87,7 +87,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
 
         def _transfer_weights(_):
-            transfer_cfg = self.config.agent_cfg.framework.algorithm.transfer_weights
+            transfer_cfg = self.config.agent_config.framework.algorithm.transfer_weights
             if transfer_cfg:
                 self.agent.model.transfer_weights(
                     source_dir=transfer_cfg.source_dir,
@@ -113,10 +113,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
         import rosnav_rl
 
-        self.agent = rosnav_rl.RL_Agent(
-            agent_cfg=self.config.agent_cfg,
-            agent_state_container=self.agent_state_container,
-        )
+        self.agent = rosnav_rl.RL_Agent(self.config.agent_config)
 
     def _setup_environment(self) -> None:
         """Sets up the training environment.
@@ -137,7 +134,7 @@ class StableBaselines3Trainer(ArenaTrainer):
 
     def _configure_verbose(self, verbose) -> None:
         """Apply log levels for rosnav_rl namespaces and this trainer."""
-        from ..tools.log_utils import configure_trainer_logging
+        from ..utils.log_utils import configure_trainer_logging
         import logging as _logging
 
         configure_trainer_logging(
@@ -171,9 +168,9 @@ class StableBaselines3Trainer(ArenaTrainer):
             max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
             init_env_by_call=False,
             namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
-            simulation_state_container=self.simulation_state_container,
+            simulation_state_container=self.agent_parameters,
             wrappers=[partial(TimeSyncWrapper, control_hz=self.config.arena_cfg.general.control_hz)],
-            observations_config=self.config.arena_cfg.general.observations_config,
+            observations_config=self.config.agent_config.observations_config,
         )
         env = sb3_wrap_env(
             node=self._supervisor_node,
@@ -210,19 +207,19 @@ class StableBaselines3Trainer(ArenaTrainer):
             and self.config.arena_cfg.monitoring.wandb.enabled
         ):
             setup_wandb(
-                run_name=self.config.agent_cfg.name,
-                group=self.config.agent_cfg.framework.algorithm.architecture_name,
+                run_name=self.config.agent_config.name,
+                group=self.config.agent_config.framework.algorithm.architecture_name,
                 config=self.config,
                 to_watch=[self.agent.model.model.policy],
-                agent_id=self.config.agent_cfg.name,
+                agent_id=self.config.agent_config.name,
             )
 
     def _train_impl(self, *args, **kwargs) -> None:
         """Implementation of training logic."""
         self.agent.train(
-            total_timesteps=self.config.agent_cfg.framework.algorithm.parameters.total_timesteps,
+            total_timesteps=self.config.agent_config.framework.algorithm.parameters.total_timesteps,
             callback=self.eval_cb,
-            progress_bar=self.config.agent_cfg.framework.algorithm.parameters.show_progress_bar,
+            progress_bar=self.config.agent_config.framework.algorithm.parameters.show_progress_bar,
         )
 
     def _complete_model_initialization(self, train_env: VecEnv) -> None:
@@ -252,7 +249,7 @@ class StableBaselines3Trainer(ArenaTrainer):
             None
             if not self.is_resume
             else self.paths[Paths.Agent].path
-            / self.config.agent_cfg.framework.algorithm.checkpoint
+            / self.config.agent_config.framework.algorithm.checkpoint
         )
 
         self.agent.initialize_model(

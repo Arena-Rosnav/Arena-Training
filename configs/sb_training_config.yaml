@@ -1,20 +1,25 @@
-# CONTAINS THE AGENT CONFIGURATION FOR TRAINING [STABLE BASELINES 3 - PPO - TEMPLATE]
+# CONTAINS THE AGENT SPECIFICATION FOR TRAINING [STABLE BASELINES 3 - PPO - TEMPLATE]
 # Controls whether to continue training from a previous checkpoint
 resume: false
 
-agent_cfg:
+agent_config:
   name: null  # agent name (should be unique) - used for model identification
-
-  # action space configuration
-  action_space:
-    is_discrete: false  # false for continuous actions, true for discrete actions
-    custom_discretization: null  # optional custom discretization schema for action space
+  # Action space type, velocity ranges, and robot radius are derived
+  # automatically from the robot description at training time.
+  # Only configure here if you need to override defaults.
+  #
+  # Observation pipeline config (relative to this file, or absolute):
+  observations_config: observations/observations.yaml
+  #
+  # To train with DISCRETE actions, set a discretization strategy:
+  # discretization:
+  #   strategy: navigational  # see GUIDE.md for all strategies
 
   framework:
     name: stable_baselines3  # ML framework name used for training
     algorithm: # training algorithm configuration
       type: PPO  # discriminator tag — PPO | A2C | TRPO | SAC | TD3 | TQC | CrossQ | generic
-      architecture_name: AGENT_3  # neural network architecture identifier
+      architecture_name: AGENT_6  # neural network architecture identifier
       checkpoint: last_model  # checkpoint to load when resuming training (last_model or best_model)
       # transfer_weights:  # for transfer learning - uncomment to use
       #   source_dir: /home/tar/catkin_ws/src/planners/rosnav/agents/AGENT_5
@@ -51,11 +56,17 @@ agent_cfg:
       transfer_weights: null  # Alternative way to specify transfer learning configuration
     normalization: null  # Input normalization parameters (if needed)
 
+  # Observation pipeline tunables - robot-hardware fields are overwritten
+  # automatically from the robot description at training time; only these
+  # two normalization settings are kept from the YAML.
+  parameters:
+    normalize: true      # normalise all observation values to [-1, 1] / [0, 1]
+    normalizer: max_abs  # max_abs | min_max | standard | identity
+
   # reward function configuration
   reward:
     reward_unit_kwargs: null  # Additional arguments for reward units
     verbose: 1
-
 
     # Comprehensive test configuration for most reward units
     reward_function_dict:
@@ -88,7 +99,7 @@ arena_cfg:
   general:
     # in debug_mode no agent directories will be created and no models will be saved
     # further no wandb logging and fake (simulated) multiprocessing for traceback
-    debug_mode: false  # Enable debugging features (no saving, no wandb, simplified multiprocessing)
+    debug_mode: true  # Enable debugging features (no saving, no wandb, simplified multiprocessing)
     goal_radius: 0.5  # Radius within which the goal is considered reached
     max_num_moves_per_eps: 600  # Maximum number of steps per episode before termination
     n_envs: 2  # Number of parallel training environments
@@ -97,7 +108,6 @@ arena_cfg:
     safety_distance: 1.0  # Minimum distance to maintain from obstacles for safety
     show_progress_bar: false  # Display progress bar during training
     control_hz: 10.0  # Control frequency in Hz (wall-clock rate ≈ sim_realtime_factor × control_hz)
-    observations_config: observations/observations.yaml  # relative to this config file's directory
 
   # Logging levels for rosnav_rl subsystems and this trainer
   # default_level applies to the entire rosnav_rl.* namespace;

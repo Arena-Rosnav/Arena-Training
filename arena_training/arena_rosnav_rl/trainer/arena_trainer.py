@@ -6,17 +6,14 @@ import rosnav_rl
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
 from rosnav_rl.rl_agent import RL_Agent
-from rosnav_rl.states import SimulationStateContainer
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
 
 
 from ..node import SupervisorNode
-from ..tools.general import (
+from ..utils.training import (
     print_base_model,
     setup_paths_dictionary,
-    write_config_yaml,
 )
-from ..tools.states import get_arena_states
 from ..utils import paths as Paths
 from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
@@ -41,7 +38,6 @@ class ArenaTrainer(ABC):
         __framework (SupportedRLFrameworks): The RL framework being used (e.g., SB3, RLlib).
         config_cls (TrainingCfg): Configuration settings for the training process.
         paths (PathsDict): Dictionary containing paths for model saving, logging, etc.
-        simulation_state_container (SimulationStateContainer): Container for simulation state data.
         agent (RL_Agent): The reinforcement learning agent being trained.
         environment (EnvironmentType): The training environment for the agent.
         hook_manager (HookManager): Manager for registering and executing hooks at various training stages.
@@ -66,7 +62,6 @@ class ArenaTrainer(ABC):
     config: arena_cfg.TrainingCfg
     paths: PathsDict
 
-    simulation_state_container: SimulationStateContainer
     agent: RL_Agent
     environment: EnvironmentType
 
@@ -120,8 +115,10 @@ class ArenaTrainer(ABC):
             None
         """
         setup_steps = [
-            self._setup_simulation_state_container,
-            self._setup_agent_state_container,
+            self._populate_agent_spec,
+            self._setup_agent_parameters,
+            lambda: setup_paths_dictionary(self, self.is_debug_mode),
+            lambda: self._write_config(),
             self._setup_agent,
             self._setup_environment,
         ]
@@ -147,7 +144,6 @@ class ArenaTrainer(ABC):
         Returns:
             None
         """
-
         self._train_impl()
 
     def save(self, checkpoint: str, *args, **kwargs) -> None:
@@ -161,7 +157,6 @@ class ArenaTrainer(ABC):
         Returns:
             None
         """
-
         self._save_model(checkpoint=checkpoint)
 
     @bind_hooks(before_stage=TrainingHookStages.ON_CLOSE)
@@ -175,8 +170,6 @@ class ArenaTrainer(ABC):
         default_hooks = {
             TrainingHookStages.BEFORE_SETUP: [
                 lambda _: print_base_model(self.config),
-                lambda _: setup_paths_dictionary(self, self.is_debug_mode),
-                lambda _: self._write_config(),
             ],
             TrainingHookStages.AFTER_SETUP: [
                 lambda _: self._set_resume_true(),
@@ -195,9 +188,8 @@ class ArenaTrainer(ABC):
     def _write_config(self):
         """Write configuration to file if not in debug mode."""
         if not self.is_debug_mode:
-            write_config_yaml(
-                self.config.model_dump(mode="json"),
-                self.paths[Paths.Agent].path / "training_config.yaml",
+            self.config.to_yaml(
+                self.paths[Paths.Agent].path / "training_config.yaml"
             )
 
     @bind_hooks(before_stage=TrainingHookStages.ON_SAVE)
@@ -217,21 +209,78 @@ class ArenaTrainer(ABC):
         self.agent.model.train()
         self._save_model(checkpoint="last_model")
 
-    def _setup_simulation_state_container(self, *args, **kwargs) -> None:
-        """Initialize agent state container."""
-        self.simulation_state_container = get_arena_states(
-            goal_radius=self.config.arena_cfg.general.goal_radius,
-            max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
-            is_discrete=self.config.agent_cfg.action_space.is_discrete,
-            safety_distance=self.config.arena_cfg.general.safety_distance,
-            robot_cfg=self.config.arena_cfg.robot,
-            task_modules_cfg=self.config.arena_cfg.task,
+    def _setup_agent_parameters(self, *args, **kwargs) -> None:
+        """Store the fully-populated AgentParameters on the trainer."""
+        self.agent_parameters = self.config.agent_config.parameters
+
+    def _populate_agent_spec(self) -> None:
+        """Derive action_space and parameters from the robot description.
+
+        The robot description (loaded from ``arena_robots``) is the
+        single source of truth for kinematics and sensor geometry.
+        :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
+        directly from the robot description and arena config.
+        """
+        from rosnav_rl.cfg.action_spaces import (
+            DifferentialDriveActionSpace,
+            OmnidirectionalActionSpace,
         )
 
-    def _setup_agent_state_container(self, *args, **kwargs) -> None:
-        """Initialize agent state container."""
-        self.agent_state_container: rosnav_rl.AgentStateContainer = (
-            self.simulation_state_container.to_agent_state_container()
+        robot_desc = self.config.arena_cfg.robot.robot_description
+        general = self.config.arena_cfg.general
+        cont = robot_desc.actions.continuous
+
+        # --- action space from robot description ---
+        if robot_desc.is_holonomic:
+            action_space = OmnidirectionalActionSpace(
+                linear_range_x=tuple(cont.linear_range),
+                linear_range_y=tuple(cont.linear_range),
+                angular_range=tuple(cont.angular_range),
+            )
+        else:
+            action_space = DifferentialDriveActionSpace(
+                linear_range=tuple(cont.linear_range),
+                angular_range=tuple(cont.angular_range),
+            )
+
+        # Carry over the discretization config from the agent_config YAML, then
+        # resolve it immediately using the robot's built-in discrete action list.
+        discretization_cfg = self.config.agent_config.discretization
+        if discretization_cfg is not None:
+            action_space = action_space.model_copy(
+                update={"discretization": discretization_cfg}
+            )
+            action_space = action_space.resolve_discretization(
+                robot_discrete_actions=robot_desc.actions.discrete
+            )
+
+        # --- unified parameters from robot description + arena config ---
+        # Start from whatever the user set in the YAML (preserves normalize,
+        # normalizer, and any other overrides), then stamp in the
+        # hardware-derived values which must always come from the robot desc.
+        parameters = self.config.agent_config.parameters.model_copy(
+            update=dict(
+                laser_num_beams=robot_desc.laser.num_beams,
+                laser_max_range=robot_desc.laser.range,
+                min_linear_vel=cont.linear_range[0],
+                max_linear_vel=cont.linear_range[1],
+                min_angular_vel=cont.angular_range[0],
+                max_angular_vel=cont.angular_range[1],
+                min_translational_vel=cont.linear_range[0],
+                max_translational_vel=cont.linear_range[1],
+                robot_radius=robot_desc.robot_radius,
+                safety_distance=general.safety_distance,
+                goal_radius=general.goal_radius,
+                max_steps=general.max_num_moves_per_eps,
+            )
+        )
+
+        self.config.agent_config = self.config.agent_config.model_copy(
+            update={
+                "robot": robot_desc.robot_model,
+                "action_space": action_space,
+                "parameters": parameters,
+            }
         )
 
     @abstractmethod

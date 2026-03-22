@@ -1,3 +1,5 @@
+"""Environment factory functions — create and wrap gym environments for RL training."""
+
 from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import gymnasium as gym
@@ -16,47 +18,26 @@ from ..cfg import (
 )
 from ...environments.wrappers import TimeSyncWrapper
 from ..node import SupervisorNode
-
-# from environments.unity import UnityEnv
 from ..stable_baselines3.vec_wrapper import (
     DelayedSubprocVecEnv,
     ProfilingVecEnv,
     VecStatsRecorder,
 )
-from ..utils.constants import Simulator
+from .constants import Simulator
 
 
 def load_vec_framestack(stack_size: int, env: VecEnv) -> VecEnv:
-    """
-    Load a vectorized environment with frame stacking.
-
-    Args:
-        stack_size (int): The number of frames to stack.
-        env (VecEnv): The vectorized environment to wrap.
-
-    Returns:
-        VecEnv: The wrapped vectorized environment with frame stacking applied.
-    """
+    """Load a vectorized environment with frame stacking."""
     return VecFrameStack(env, n_stack=stack_size, channels_order="first")
 
 
 def determine_env_class(simulator: Simulator) -> Union[gym.Env, gym.Wrapper]:
-    """
-    Determines the environment class based on the specified simulator.
-
-    Args:
-        simulator (Simulator): The simulator to use.
-
-    Returns:
-        Union[gym.Env, gym.Wrapper]: The environment class.
-    """
+    """Determines the environment class based on the specified simulator."""
     return arena_envs.GazeboEnv
     if simulator == Simulator.FLATLAND:
         return arena_envs.FlatlandEnv
     elif simulator == Simulator.GAZEBO:
         return arena_envs.GazeboEnv
-    # elif simulator == Simulator.UNITY:
-    #     return UnityEnv
     else:
         raise RuntimeError(f"Simulator {simulator} is not supported.")
 
@@ -67,7 +48,7 @@ def _init_env_fnc(
     ns: Union[str, Namespace],
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
-    simulation_state_container: rosnav_rl.SimulationStateContainer,
+    simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
     init_by_call: bool = False,
     obs_unit_kwargs: dict = None,
@@ -99,7 +80,7 @@ def _test_init_env_fnc(
     ns: Union[str, Namespace],
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
-    simulation_state_container: rosnav_rl.SimulationStateContainer,
+    simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
     node: SupervisorNode = None,
     init_by_call: bool = False,
@@ -139,16 +120,6 @@ def sb3_wrap_env(
     """
     Creates and wraps a single vectorized environment used for both training and
     evaluation (shared-env mode).
-
-    Args:
-        node: ROS2 supervisor node used for profiling.
-        env_fncs: List of callables that each return an initialized gym environment.
-        general_cfg: General training configuration (debug_mode, etc.).
-        monitoring_cfg: Configuration for episode-stats recording.
-        profiling_cfg: Configuration for step/reset profiling.
-
-    Returns:
-        A wrapped VecEnv ready for both rollout collection and periodic evaluation.
     """
 
     def create_env(fncs):
@@ -193,11 +164,11 @@ def sb3_wrap_env(
 
 def make_envs(
     rl_agent: rosnav_rl.RL_Agent,
-    simulation_state_container: rosnav_rl.SimulationStateContainer,
+    simulation_state_container: rosnav_rl.AgentParameters,
     n_envs: int,
     max_steps: int,
     init_env_by_call: bool,
-    namespace_fn: Callable,  # Changed from callable
+    namespace_fn: Callable,
     node: SupervisorNode = None,
     wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
     observations_config: Optional[str] = None,
@@ -205,32 +176,24 @@ def make_envs(
     """
     Creates a list of environment initialization functions.
 
-    This function generates callable functions that each initialize a gym environment
-    for reinforcement learning training. The environments are configured with the
-    specified RL agent's space manager and reward function.
-
     Args:
-        rl_agent: The reinforcement learning agent containing space manager and reward function
-        simulation_state_container: Container holding the state of the simulation
-        n_envs: Number of environments to create
-        max_steps: Maximum number of steps per episode for each environment
-        init_env_by_call: If True, environments will be initialized when their function is called
-        namespace_fn: Function that takes an index and returns a namespace for the environment
-        wrappers: Optional list of gym wrappers to apply to each environment
-        observations_config: Path to a custom observations YAML config file
+        rl_agent: The RL agent containing space manager and reward function.
+        simulation_state_container: AgentParameters shared across environments.
+        n_envs: Number of environments to create.
+        max_steps: Maximum steps per episode.
+        init_env_by_call: If True, environments initialize when their function is called.
+        namespace_fn: Function mapping index → environment namespace string.
+        wrappers: Optional gym wrappers to apply to each environment.
+        observations_config: Path to a custom observations YAML config file.
 
     Returns:
-        List of callables, each initializing a gym environment when called
+        List of callables, each initializing a gym environment when called.
     """
 
-    def create_env_fnc(
-        ns: Union[str, Namespace],
-    ) -> callable:
+    def create_env_fnc(ns: Union[str, Namespace]) -> callable:
         return _test_init_env_fnc(
             node=node,
-            env_class=determine_env_class(
-                None
-            ),  # Replace None with the desired simulator
+            env_class=determine_env_class(None),
             ns=ns,
             space_manager=rl_agent.space_manager,
             reward_function=rl_agent.reward_function.copy(),
@@ -241,18 +204,4 @@ def make_envs(
             observations_config=observations_config,
         )
 
-    def create_env_fncs(
-        n_envs: int,
-        ns_fn: Callable,
-    ) -> List[Callable]:
-        return [
-            create_env_fnc(
-                ns=ns_fn(idx),
-            )
-            for idx in range(n_envs)
-        ]
-
-    return create_env_fncs(
-        n_envs=n_envs,
-        ns_fn=namespace_fn,
-    )
+    return [create_env_fnc(ns=namespace_fn(idx)) for idx in range(n_envs)]

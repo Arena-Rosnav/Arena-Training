@@ -91,7 +91,7 @@ def _set_timesteps(config_dict: dict, timesteps: int) -> None:
     """Override total training steps in the config dict (best-effort)."""
     # SB3 path
     try:
-        config_dict["agent_cfg"]["framework"]["algorithm"]["parameters"][
+        config_dict["agent_config"]["framework"]["algorithm"]["parameters"][
             "total_timesteps"
         ] = timesteps
         return
@@ -100,7 +100,7 @@ def _set_timesteps(config_dict: dict, timesteps: int) -> None:
 
     # DreamerV3 path
     try:
-        config_dict["agent_cfg"]["framework"]["training"]["steps"] = timesteps
+        config_dict["agent_config"]["framework"]["training"]["steps"] = timesteps
         return
     except (KeyError, TypeError):
         pass
@@ -131,11 +131,11 @@ def _make_sb3_trainer(training_cfg, pruner):
 
             self.agent.train(
                 total_timesteps=(
-                    self.config.agent_cfg.framework.algorithm.parameters.total_timesteps
+                    self.config.agent_config.framework.algorithm.parameters.total_timesteps
                 ),
                 callback=combined,
                 progress_bar=(
-                    self.config.agent_cfg.framework.algorithm.parameters.show_progress_bar
+                    self.config.agent_config.framework.algorithm.parameters.show_progress_bar
                 ),
             )
 
@@ -163,7 +163,7 @@ def _make_dreamerv3_trainer(training_cfg, pruner):
 
             after_eval = _combined if (curriculum_hook or pruner_hook) else None
 
-            fw_cfg = self.config.agent_cfg.framework
+            fw_cfg = self.config.agent_config.framework
             logger.info(
                 "[Train] DreamerV3 \u2014 total_steps=%d  eval_every=%d  device=%s",
                 fw_cfg.training.steps,
@@ -207,7 +207,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
 
         # \u2500\u2500 2. Patch config \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         trial_config = apply_params(base_config_dict, params)
-        trial_config["agent_cfg"]["name"] = (
+        trial_config["agent_config"]["name"] = (
             f"{tuning_cfg.study_name}_trial_{trial.number}"
         )
         if tuning_cfg.trial_timesteps is not None:
@@ -221,7 +221,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
         training_cfg = TrainingCfg.model_validate(trial_config)
 
         # \u2500\u2500 4. Build pruner and framework-specific trainer \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-        framework = SupportedRLFrameworks(training_cfg.agent_cfg.framework.name)
+        framework = SupportedRLFrameworks(training_cfg.agent_config.framework.name)
         if framework not in _tuning_registry:
             raise ValueError(
                 f"Unsupported framework for tuning: {framework!r}. "

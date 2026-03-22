@@ -1,3 +1,5 @@
+"""Monitoring / experiment-tracking helpers (Weights & Biases)."""
+
 import re
 from typing import List, TYPE_CHECKING
 
@@ -25,22 +27,7 @@ def setup_wandb(
     agent_id: str = None,
     to_watch: List[torch.nn.Module] = [],
 ) -> None:
-    """
-    Set up Weights and Biases (wandb) for tracking and visualizing training.
-
-    This function logs into wandb, initializes a new run with the given training
-    configuration, and sets up monitoring for TensorBoard and Gym environments.
-    It also watches the policy model for logging gradients and parameters.
-
-    Args:
-        train_cfg (TrainingCfg): The training configuration object containing
-            settings and parameters for the training session.
-        rl_model (RL_Model): The reinforcement learning model to be tracked
-            and monitored by wandb.
-
-    Returns:
-        None
-    """
+    """Set up Weights and Biases (wandb) for training tracking."""
     wandb.login()
     wandb.init(
         name=run_name if run_name else config.arena_cfg.monitoring.wandb.run_name,

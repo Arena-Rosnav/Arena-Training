@@ -40,10 +40,17 @@ class RobotYamlCfg(BaseModel):
 
 
 class RobotCfg(BaseModel):
+    robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
     robot_description: Optional[RobotYamlCfg] = Field(
-        alias="Robot Yaml Description",
-        default_factory=lambda: RobotYamlCfg.model_validate(
-            arena_robots.Robot.RobotIdentifier("jackal").resolve_sync().model_params
-        ),
+        None, alias="Robot Yaml Description"
     )
-    attach_full_range_laser: Optional[bool] = True
+
+    def model_post_init(self, __context) -> None:
+        if self.robot_description is None:
+            object.__setattr__(
+                self,
+                "robot_description",
+                RobotYamlCfg.model_validate(
+                    arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync().model_params
+                ),
+            )

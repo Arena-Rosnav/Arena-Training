@@ -13,7 +13,7 @@ from rosnav_rl.observations.factory.factory import (
 )
 from rosnav_rl.reward.reward_function import RewardFunction
 from rosnav_rl.spaces import BaseSpaceManager
-from rosnav_rl.states import SimulationStateContainer
+from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from std_srvs.srv import Empty as EmptySrv
@@ -60,7 +60,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         space_manager: Union[BaseSpaceManager, Dict[str, Any]],
         reward_function: Union[RewardFunction, Dict[str, Any]],
         node: Optional[SupervisorNode] = None,
-        simulation_state_container: Optional[SimulationStateContainer] = None,
+        simulation_state_container: Optional[AgentParameters] = None,
         max_steps_per_episode: int = 100,
         init_by_call: bool = False,
         wait_for_obs: bool = False,
@@ -79,7 +79,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 dict for a class that defines the action and observation spaces.
             reward_function (Union[RewardFunction, Dict[str, Any]]): An instance or configuration
                 dict for a class that calculates the reward.
-            simulation_state_container (Optional[SimulationStateContainer]): A container for sharing
+            simulation_state_container (Optional[AgentParameters]): A container for sharing
                 state data across different components. Defaults to None.
             max_steps_per_episode (int): The maximum number of steps before an episode is
                 truncated. Defaults to 100.
@@ -102,7 +102,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             raise ValueError("A reward function is required for training mode.")
 
         self._initialize_agent_components(space_manager, reward_function)
-        self.__simulation_state_container = simulation_state_container
+        self.__agent_parameters = simulation_state_container
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
@@ -198,7 +198,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             config=config,
             node=self.node,
             ns=self.ns.to_string(),
-            simulation_state_container=self.simulation_state_container,
+            simulation_state_container=self.__agent_parameters,
             wait_for_obs=self.__wait_for_obs,  # Wait for topics to be available
         )
 
@@ -211,8 +211,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         return self._model_space_manager.observation_space
 
     @property
-    def simulation_state_container(self) -> SimulationStateContainer:
-        return self.__simulation_state_container
+    def agent_parameters(self) -> AgentParameters:
+        return self.__agent_parameters
 
     @property
     def is_train_mode(self) -> bool:
@@ -267,13 +267,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
 
         obs_dict = self.observation_collector.get_observations(
-            simulation_state_container=self.__simulation_state_container,
+            simulation_state_container=self.__agent_parameters,
             is_first=self.__is_first_step,
         )
 
         reward, reward_info = self._reward_function.get_reward(
             obs_dict=obs_dict,
-            simulation_state_container=self.__simulation_state_container,
+            simulation_state_container=self.__agent_parameters,
         )
 
         self._steps_curr_episode += 1

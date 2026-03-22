@@ -1,14 +1,24 @@
 # This is a configuration template for DreamerV3 agents in ROS-Nav
 # Use this template as a starting point for DreamerV3-based RL navigation
 
-agent_cfg:
+agent_config:
   name: dreamerv3-3  # Name of your agent - will be used for identifying model files
-  robot: jackal  # Target robot model (jackal, turtlebot, etc.)
-  
-  # Action space configuration
-  action_space:
-    is_discrete: false  # DreamerV3 works well with continuous actions
-    custom_discretization: null  # Not needed for continuous actions
+  # Action space type, velocity ranges, and robot radius are derived
+  # automatically from the robot description at training time.
+  #
+  # Observation pipeline config (relative to this file, or absolute):
+  observations_config: observations/observations.yaml
+  #
+  # To train with DISCRETE actions, set a discretization strategy:
+  # discretization:
+  #   strategy: navigational  # see GUIDE.md for all strategies
+
+  # Observation pipeline tunables - robot-hardware fields are overwritten
+  # automatically from the robot description at training time; only these
+  # two normalization settings are kept from the YAML.
+  # parameters:
+  #   normalize: true      # normalise all observation values to [-1, 1] / [0, 1]
+  #   normalizer: max_abs  # max_abs | min_max | standard | identity
   
   # DreamerV3-specific framework configuration
   framework:
@@ -244,7 +254,6 @@ arena_cfg:
     n_envs: 2  # Number of parallel environments (should match agent settings)
     no_gpu: false  # Force CPU even if GPU is available
     safety_distance: 1.0  # Minimum safety distance from obstacles
-    observations_config: observations/observations.yaml  # relative to this config file's directory
     control_hz: 10.0  # Step frequency cap in Hz (TimeSyncWrapper)
     verbose: 1  # 0=warnings only  1=stage transitions  2=debug details
   

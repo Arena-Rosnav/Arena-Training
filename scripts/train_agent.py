@@ -25,8 +25,8 @@ from rosgraph_msgs.msg import Clock
 
 # Import arena_training subpackages
 from arena_training.arena_rosnav_rl.cfg import TrainingCfg
-from arena_training.arena_rosnav_rl.tools.argsparser import parse_training_args
-from arena_training.arena_rosnav_rl.tools.config import load_training_config
+from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
+from arena_training.arena_rosnav_rl.utils.config import load_training_config
 from arena_training.arena_rosnav_rl.trainer import get_trainer
 
 # Configure logging
@@ -213,10 +213,17 @@ def main():
         # Load training configuration from YAML file
         logger.info("Loading training configuration...")
         config = load_training_config(str(config_path))
+
+        # Override robot model if provided via CLI
+        if args.robot:
+            config.arena_cfg.robot.robot_model = args.robot
+            config.arena_cfg.robot.robot_description = None
+            config.arena_cfg.robot.model_post_init(None)
+
         logger.info("Configuration loaded successfully")
 
         # Create the appropriate trainer based on the framework
-        logger.info("Initializing trainer for framework: %s", config.agent_cfg.framework.name)
+        logger.info("Initializing trainer for framework: %s", config.agent_config.framework.name)
         trainer = get_trainer(config)
 
         # Start training

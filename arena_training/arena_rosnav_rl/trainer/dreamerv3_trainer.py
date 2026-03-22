@@ -9,9 +9,9 @@ import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
 from rosnav_rl import SupportedRLFrameworks
 
-from ..tools.config import load_training_config
-from ..tools.env_utils import make_envs
-from ..tools.model_utils import setup_wandb
+from ..utils.config import load_training_config
+from ..utils.env_factory import make_envs
+from ..utils.monitoring import setup_wandb
 from ..trainer.arena_trainer import ArenaTrainer
 from ...environments.wrappers import TimeSyncWrapper
 
@@ -68,11 +68,11 @@ class DreamerV3Trainer(ArenaTrainer):
             and self.config.arena_cfg.monitoring.wandb.enabled
         ):
             setup_wandb(
-                run_name=self.config.agent_cfg.name,
+                run_name=self.config.agent_config.name,
                 group=self.config.arena_cfg.monitoring.wandb.group,
                 config=self.config,
                 to_watch=[self.agent.model.model],
-                agent_id=self.config.agent_cfg.name,
+                agent_id=self.config.agent_config.name,
             )
 
     def _setup_agent(self, *args, **kwargs):
@@ -85,14 +85,11 @@ class DreamerV3Trainer(ArenaTrainer):
         from ..utils import paths as Paths
 
         # Ensure logdir is set before DreamerV3Model.__init__ runs
-        fw_cfg = self.config.agent_cfg.framework
+        fw_cfg = self.config.agent_config.framework
         if fw_cfg.general.logdir is None and hasattr(self, "paths"):
             fw_cfg.general.logdir = str(self.paths[Paths.Agent].path)
 
-        self.agent = rosnav_rl.RL_Agent(
-            agent_cfg=self.config.agent_cfg,
-            agent_state_container=self.agent_state_container,
-        )
+        self.agent = rosnav_rl.RL_Agent(self.config.agent_config)
         self.agent.initialize_model()
 
     def _setup_environment(self, *args, **kwargs):
@@ -124,7 +121,7 @@ class DreamerV3Trainer(ArenaTrainer):
             max_steps=general_cfg.max_num_moves_per_eps,
             init_env_by_call=False,
             namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
-            simulation_state_container=self.simulation_state_container,
+            simulation_state_container=self.agent_parameters,
             wrappers=[
                 partial(TimeSyncWrapper, control_hz=general_cfg.control_hz),
                 dreamerv3.WoTruncatedFlag,
@@ -138,7 +135,7 @@ class DreamerV3Trainer(ArenaTrainer):
                 dreamerv3.ChannelFirsttoLast,
                 dreamerv3.RenameObsForDreamer,
             ],
-            observations_config=general_cfg.observations_config,
+            observations_config=self.config.agent_config.observations_config,
         )
 
         if general_cfg.debug_mode:
@@ -183,7 +180,7 @@ class DreamerV3Trainer(ArenaTrainer):
 
     def _configure_verbose(self, verbose) -> None:
         """Apply log levels for rosnav_rl namespaces and this trainer."""
-        from ..tools.log_utils import configure_trainer_logging
+        from ..utils.log_utils import configure_trainer_logging
 
         configure_trainer_logging(
             logging_cfg=getattr(self.config.arena_cfg, "logging", None),
@@ -194,7 +191,7 @@ class DreamerV3Trainer(ArenaTrainer):
 
     def _train_impl(self, *args, **kwargs):
         """Run the DreamerV3 training loop via the model's own train() method."""
-        fw_cfg = self.config.agent_cfg.framework
+        fw_cfg = self.config.agent_config.framework
         logger.info(
             "[Train] Starting DreamerV3 training — "
             "total_steps=%d  eval_every=%d  batch=%dx%d  device=%s",

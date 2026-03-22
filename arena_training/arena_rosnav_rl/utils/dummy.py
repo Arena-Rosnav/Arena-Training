@@ -11,7 +11,7 @@ def get_dummy_dreamer_cfg():
                 debug_mode=True,
             )
         ),
-        agent_cfg=rosnav_rl.AgentCfg(
+        agent_config=rosnav_rl.AgentConfig(
             name=None,
             framework=dreamerv3_cfg.DreamerV3Cfg(),
             reward=rosnav_rl.RewardCfg(
@@ -47,7 +47,7 @@ def get_dummy_sb3_cfg():
 
     return arena_cfg.TrainingCfg(
         arena_cfg=arena_cfg.ArenaSB3Cfg(),
-        agent_cfg=rosnav_rl.AgentCfg(
+        agent_config=rosnav_rl.AgentConfig(
             framework=sb3,
             reward=rosnav_rl.RewardCfg(
                 reward_function_dict={

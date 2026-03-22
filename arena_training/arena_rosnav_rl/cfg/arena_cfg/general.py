@@ -24,4 +24,3 @@ class GeneralCfg(BaseModel):
     safety_distance: float = Field(1.0, gt=0)
     verbose: Union[int, bool] = Field(False, title="Verbose Mode")
     control_hz: float = Field(10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
-    observations_config: Optional[str] = Field(None, description="Path to observations YAML config file")
