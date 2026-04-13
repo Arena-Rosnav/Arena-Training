@@ -4,22 +4,17 @@ resume: false
 
 agent_config:
   name: null  # agent name (should be unique) - used for model identification
-  # Action space type, velocity ranges, and robot radius are derived
-  # automatically from the robot description at training time.
-  # Only configure here if you need to override defaults.
-  #
-  # Observation pipeline config (relative to this file, or absolute):
-  observations_config: observations/observations.yaml
-  #
-  # To train with DISCRETE actions, set a discretization strategy:
-  # discretization:
-  #   strategy: navigational  # see GUIDE.md for all strategies
+
+  # action space configuration - populated from robot description at runtime.
+  # Use 'type: differential_drive' or 'type: omnidirectional' for an explicit
+  # override; set to null to derive from the robot model automatically.
+  action_space: null
 
   framework:
     name: stable_baselines3  # ML framework name used for training
     algorithm: # training algorithm configuration
       type: PPO  # discriminator tag — PPO | A2C | TRPO | SAC | TD3 | TQC | CrossQ | generic
-      architecture_name: AGENT_6  # neural network architecture identifier
+      architecture_name: AGENT_1  # neural network architecture identifier
       checkpoint: last_model  # checkpoint to load when resuming training (last_model or best_model)
       # transfer_weights:  # for transfer learning - uncomment to use
       #   source_dir: /home/tar/catkin_ws/src/planners/rosnav/agents/AGENT_5
