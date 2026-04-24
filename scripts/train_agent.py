@@ -119,38 +119,26 @@ def get_config_path(args) -> Path:
         )
         return config_path.absolute()
 
-    # Try to find the config in the arena_bringup package
+    # Try to find the config in the arena_training package share
     from ament_index_python.packages import get_package_share_directory
 
     try:
-        arena_bringup_dir = get_package_share_directory("arena_bringup")
-        package_config_path = (
-            Path(arena_bringup_dir) / "configs" / "training" / config_file
-        )
+        arena_training_dir = get_package_share_directory("arena_training")
+        package_config_path = Path(arena_training_dir) / "configs" / config_file
 
         if package_config_path.exists():
-            logger.info(f"Using config file from arena_bringup: {package_config_path}")
+            logger.info(f"Using config file from arena_training: {package_config_path}")
             return package_config_path
         else:
             logger.warning(f"Config file not found at {package_config_path}")
-    except Exception as e:
-        logger.warning(f"Could not locate arena_bringup package: {e}")
-
-    # Last resort: try arena_training package share directory
-    try:
-        arena_training_dir = get_package_share_directory("arena_training")
-        fallback_path = Path(arena_training_dir) / "configs" / config_file
-        if fallback_path.exists():
-            logger.info(f"Using config file from arena_training share: {fallback_path}")
-            return fallback_path
     except Exception as e:
         logger.warning(f"Could not locate arena_training package: {e}")
 
     raise FileNotFoundError(
         f"Config file '{config_file}' not found in:\n"
         f"  - Current directory\n"
-        f"  - arena_bringup package configs\n"
         f"  - arena_training package share configs\n"
+        f"  - arena_bringup package configs\n"
         f"Please provide an absolute path or ensure the file exists in one of these locations."
     )
 
