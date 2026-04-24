@@ -226,21 +226,24 @@ class ArenaTrainer(ABC):
             OmnidirectionalActionSpace,
         )
 
-        robot_desc = self.config.arena_cfg.robot.robot_description
+        robot_cfg = self.config.arena_cfg.robot
+        robot_desc = robot_cfg.robot_description
         general = self.config.arena_cfg.general
         cont = robot_desc.actions.continuous
+        linear = (cont.linear.min, cont.linear.max)
+        angular = (cont.angular.min, cont.angular.max)
 
         # --- action space from robot description ---
         if robot_desc.is_holonomic:
             action_space = OmnidirectionalActionSpace(
-                linear_range_x=tuple(cont.linear_range),
-                linear_range_y=tuple(cont.linear_range),
-                angular_range=tuple(cont.angular_range),
+                linear_range_x=linear,
+                linear_range_y=linear,
+                angular_range=angular,
             )
         else:
             action_space = DifferentialDriveActionSpace(
-                linear_range=tuple(cont.linear_range),
-                angular_range=tuple(cont.angular_range),
+                linear_range=linear,
+                angular_range=angular,
             )
 
         # Carry over the discretization config from the agent_config YAML, then
@@ -262,13 +265,13 @@ class ArenaTrainer(ABC):
             update=dict(
                 laser_num_beams=robot_desc.laser.num_beams,
                 laser_max_range=robot_desc.laser.range,
-                min_linear_vel=cont.linear_range[0],
-                max_linear_vel=cont.linear_range[1],
-                min_angular_vel=cont.angular_range[0],
-                max_angular_vel=cont.angular_range[1],
-                min_translational_vel=cont.linear_range[0],
-                max_translational_vel=cont.linear_range[1],
-                robot_radius=robot_desc.robot_radius,
+                min_linear_vel=cont.linear.min,
+                max_linear_vel=cont.linear.max,
+                min_angular_vel=cont.angular.min,
+                max_angular_vel=cont.angular.max,
+                min_translational_vel=cont.linear.min,
+                max_translational_vel=cont.linear.max,
+                robot_radius=robot_desc.radius,
                 safety_distance=general.safety_distance,
                 goal_radius=general.goal_radius,
                 max_steps=general.max_num_moves_per_eps,
@@ -277,7 +280,7 @@ class ArenaTrainer(ABC):
 
         self.config.agent_config = self.config.agent_config.model_copy(
             update={
-                "robot": robot_desc.robot_model,
+                "robot": robot_cfg.robot_model,
                 "action_space": action_space,
                 "parameters": parameters,
             }

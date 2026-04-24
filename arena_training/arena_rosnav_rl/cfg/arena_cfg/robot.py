@@ -1,56 +1,32 @@
-from typing import Dict, List, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-# from ...tools.general import get_robot_yaml_path, load_yaml
 import arena_robots.Robot
-
-
-class DiscreteAction(BaseModel):
-    name: str
-    linear: float
-    angular: float
-
-
-class ContinuousActionCfg(BaseModel):
-    linear_range: List[float]
-    angular_range: List[float]
-
-
-class ActionsCfg(BaseModel):
-    discrete: List[DiscreteAction]
-    continuous: ContinuousActionCfg
-
-
-class LaserCfg(BaseModel):
-    angle: Dict[str, float]
-    num_beams: int
-    range: float
-    update_rate: int
-
-
-class RobotYamlCfg(BaseModel):
-    robot_model: str
-    robot_radius: float
-    robot_base_frame: str
-    robot_sensor_frame: str
-    is_holonomic: bool
-    actions: ActionsCfg
-    laser: LaserCfg
+from arena_robots.caps import MobileSpec
 
 
 class RobotCfg(BaseModel):
+    """Arena robot handle: the canonical ``robot_model`` identifier plus a
+    lazily-resolved :class:`~arena_robots.caps.MobileSpec` that both training
+    code and the rosnav_rl stack read for kinematics/sensor geometry.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
-    robot_description: Optional[RobotYamlCfg] = Field(
-        None, alias="Robot Yaml Description"
+    robot_description: Optional[MobileSpec] = Field(
+        None,
+        alias="Robot Yaml Description",
+        exclude=True,
     )
 
     def model_post_init(self, __context) -> None:
         if self.robot_description is None:
-            object.__setattr__(
-                self,
-                "robot_description",
-                RobotYamlCfg.model_validate(
-                    arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync().model_params
-                ),
-            )
+            mobile = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync().mobile
+            if mobile is None:
+                raise ValueError(
+                    f"robot '{self.robot_model}' does not advertise a 'mobile' cap — "
+                    f"RobotCfg requires caps/mobile.yaml"
+                )
+            object.__setattr__(self, "robot_description", mobile)
