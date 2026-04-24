@@ -103,7 +103,7 @@ class ConfigComponent(PathComponent):
 
     def __init__(self, file_name: str = ""):
         self.file_name = file_name
-        self._base = _ARENA_TRAINING_ROOT / "configs"
+        self._base = Path(get_package_share_directory("arena_training")) / "configs"
 
     @cached_property
     def path(self) -> Path:

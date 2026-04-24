@@ -136,18 +136,21 @@ def get_config_path(args) -> Path:
     except Exception as e:
         logger.warning(f"Could not locate arena_bringup package: {e}")
 
-    # Last resort: try relative to script directory
-    script_dir = Path(__file__).parent.parent
-    fallback_path = script_dir / "configs" / config_file
-    if fallback_path.exists():
-        logger.info(f"Using config file from script directory: {fallback_path}")
-        return fallback_path
+    # Last resort: try arena_training package share directory
+    try:
+        arena_training_dir = get_package_share_directory("arena_training")
+        fallback_path = Path(arena_training_dir) / "configs" / config_file
+        if fallback_path.exists():
+            logger.info(f"Using config file from arena_training share: {fallback_path}")
+            return fallback_path
+    except Exception as e:
+        logger.warning(f"Could not locate arena_training package: {e}")
 
     raise FileNotFoundError(
         f"Config file '{config_file}' not found in:\n"
         f"  - Current directory\n"
         f"  - arena_bringup package configs\n"
-        f"  - Script directory configs\n"
+        f"  - arena_training package share configs\n"
         f"Please provide an absolute path or ensure the file exists in one of these locations."
     )
 
