@@ -10,7 +10,6 @@ maintainers = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }
 requires-python = "==3.10.*"
 dependencies = [
     # Core Python dependencies
-    "numpy>=1.25.4,<2.0.0",
     "pyyaml>=6.0,<7.0",
     # Deep Learning & RL
     "torch>=2.0.0,<3.0.0",
