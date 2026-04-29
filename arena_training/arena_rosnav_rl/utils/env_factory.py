@@ -66,6 +66,7 @@ def _init_env_fnc(
             max_steps_per_episode=max_steps_per_episode,
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
+            wait_for_obs=True,
         )
         for wrapper in wrappers or []:
             env = wrapper(env)
@@ -101,6 +102,7 @@ def _test_init_env_fnc(
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
             observations_config=observations_config,
+            wait_for_obs=True,
         )
         for wrapper in wrappers or []:
             env = wrapper(env)

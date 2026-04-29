@@ -1,4 +1,5 @@
 import threading
+import time
 from abc import ABC
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -16,6 +17,7 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
+from task_generator_msgs.msg import EpisodeRecord
 from task_generator_msgs.srv import Pause as PauseSrv, ResetEpisode
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
@@ -116,6 +118,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._reset_task_srv = None
         self._pause_srv = None
         self._cmd_vel_pub = None
+        self._episode_state_sub = None
+        self._latest_episode: Optional[EpisodeRecord] = None
+        self._episode_event = threading.Event()
+        # Set on first step(); reset() blocks here so we don't fire a fresh
+        # task_generator reset until the model has cleared its first inference.
+        self._ready_event = threading.Event()
+        self._first_reset_done = False
+        # Lazy-pause: pause(True) only takes effect if inference exceeds threshold.
+        self._pause_pending_timer: Optional[threading.Timer] = None
+        self._pause_pending_token: object = None
+        self._pause_lock = threading.Lock()
+        self._pause_lazy_threshold: float = 5.0
         self._initialized = False
 
         if not init_by_call:
@@ -176,6 +190,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
         self.node.get_logger().info(
             f"Created direct cmd_vel publisher at: {cmd_vel_topic}"
+        )
+
+        # Episode-state feed from task_generator (TRANSIENT_LOCAL).
+        episode_topic = (self.ns[0] / self.ns[1] / "state" / "episode").to_string()
+        self._episode_state_sub = self.node.create_subscription(
+            EpisodeRecord,
+            episode_topic,
+            self._on_episode_state,
+            qos_profile=rclpy.qos.QoSProfile(
+                depth=1,
+                durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+            callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
     def _setup_observation_manager(self):
@@ -264,6 +291,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """
         decoded_action = self._decode_action(action)
 
+        # First step() means agent inference returned at least once: model is loaded.
+        if not self._ready_event.is_set():
+            self._ready_event.set()
+
         # Publish velocity command directly — no nav2 controller dependency.
         self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
 
@@ -283,14 +314,21 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             curr_steps=self._steps_curr_episode,
             max_steps=self._max_steps_per_episode,
         )
+        tg = self._latest_episode
+        if tg is not None and tg.outcome_state != EpisodeRecord.UNFINISHED:
+            done = True
+            info["done_reason"] = tg.outcome_reason or f"task_generator:{tg.outcome_state}"
+            info["is_success"] = int(tg.outcome_state == EpisodeRecord.SUCCESS)
+            info["episode_length"] = self._steps_curr_episode
         obs_dict["is_terminal"] = done
         self.__is_first_step = False
 
         if done:
             done_reason = info.get("done_reason", "unknown")
             is_success = info.get("is_success", False)
+            episode_id = self._latest_episode.episode_id if self._latest_episode else self._episode
             msg = (
-                f"[{self.ns.to_string()}] Episode {self._episode} ended — "
+                f"[{self.ns.to_string()}] Episode {episode_id} ended — "
                 f"reason: {done_reason}, steps: {self._steps_curr_episode}, "
                 f"reward: {reward:.3f}"
             )
@@ -332,18 +370,58 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._cmd_vel_pub.publish(Twist())
 
         try:
-            # Reset episode-specific variables
-            self._episode += 1
+            steps_this_episode = self._steps_curr_episode
             self._steps_curr_episode = 0
             self.__is_first_step = True
 
-            self.node.get_logger().info(
-                f"[{self.ns.to_string()}] Resetting environment for episode {self._episode}..."
-            )
+            if not self._first_reset_done:
+                # First reset: don't trigger reset_task (task_generator may not
+                # have finished setup yet — its setup() ends with _spawn_episode
+                # which auto-spawns the first episode). Just wait for that
+                # auto-spawned episode to be published.
+                self.node.get_logger().info(
+                    f"[{self.ns.to_string()}] Waiting for task_generator's first episode..."
+                )
+                if not self._wait_for_new_episode(prev_id=0, timeout=60.0):
+                    self.node.get_logger().warn(
+                        "Did not see a fresh first episode within 60 s; proceeding."
+                    )
+                self._first_reset_done = True
+                self._episode = (
+                    self._latest_episode.episode_id if self._latest_episode is not None else 1
+                )
+            elif (
+                self._latest_episode is not None
+                and self._latest_episode.outcome_state == EpisodeRecord.UNFINISHED
+                and steps_this_episode == 0
+            ):
+                # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
+                pass
+            else:
+                # Hold off real resets until the model has finished its first
+                # inference (compile pass), so the pause/unpause loop is reliable.
+                if not self._ready_event.is_set():
+                    self.node.get_logger().info(
+                        f"[{self.ns.to_string()}] Holding reset until model is loaded..."
+                    )
+                    if not self._ready_event.wait(timeout=120.0):
+                        self.node.get_logger().warn(
+                            "Ready signal timed out at 120 s, proceeding anyway."
+                        )
 
-            self._before_task_reset()
-            self.reset_task()
-            self._after_task_reset()
+                prev_id = self._latest_episode.episode_id if self._latest_episode is not None else 0
+
+                self.node.get_logger().info(
+                    f"[{self.ns.to_string()}] Resetting environment after episode {prev_id}..."
+                )
+
+                self._before_task_reset()
+                self.reset_task()
+                self._wait_for_new_episode(prev_id, timeout=10.0)
+                self._after_task_reset()
+                self._episode = (
+                    self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
+                )
 
             self._reward_function.reset()
 
@@ -372,15 +450,48 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._reset_task_srv.destroy()
         if self._pause_srv is not None:
             self._pause_srv.destroy()
+        if self._episode_state_sub is not None:
+            self.node.destroy_subscription(self._episode_state_sub)
 
     def pause(self, paused: bool) -> None:
-        """Pause (paused=True) or unpause (paused=False) the physics simulator.
+        """Lazy pause/unpause: pause(True) only fires if inference takes longer
+        than ``_pause_lazy_threshold``; pause(False) cancels any pending pause
+        and unconditionally issues an unpause. Race-safe: a token is checked in
+        the timer callback so a late-firing timer that lost the race against
+        ``pause(False)`` does not send a stray PAUSE."""
+        if self._pause_srv is None:
+            return
+        with self._pause_lock:
+            if self._pause_pending_timer is not None:
+                self._pause_pending_timer.cancel()
+                self._pause_pending_timer = None
+            self._pause_pending_token = None
+            if paused:
+                token = object()
+                self._pause_pending_token = token
+                timer = threading.Timer(
+                    self._pause_lazy_threshold,
+                    self._maybe_fire_pause,
+                    args=(token,),
+                )
+                timer.daemon = True
+                self._pause_pending_timer = timer
+                timer.start()
+                fire_unpause_now = False
+            else:
+                fire_unpause_now = True
+        if fire_unpause_now:
+            self._fire_pause_request(False)
 
-        Routes through the task-generator node so that ownership of the
-        simulator API stays in one place.  The call is fire-and-forget:
-        Gazebo processes it within ~1 ms on localhost, well before any
-        significant neural-network computation begins.
-        """
+    def _maybe_fire_pause(self, token: object) -> None:
+        with self._pause_lock:
+            if self._pause_pending_token is not token:
+                return
+            self._pause_pending_token = None
+            self._pause_pending_timer = None
+        self._fire_pause_request(True)
+
+    def _fire_pause_request(self, paused: bool) -> None:
         if self._pause_srv is None:
             return
         req = PauseSrv.Request()
@@ -461,3 +572,25 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def _after_task_reset(self):
         """Hook for executing actions after the task is reset."""
         pass
+
+    def _on_episode_state(self, msg: EpisodeRecord) -> None:
+        self._latest_episode = msg
+        self._episode_event.set()
+
+    def _wait_for_new_episode(self, prev_id: int, timeout: float) -> bool:
+        """Block until task_generator publishes a fresh UNFINISHED episode."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            tg = self._latest_episode
+            if (
+                tg is not None
+                and tg.episode_id > prev_id
+                and tg.outcome_state == EpisodeRecord.UNFINISHED
+            ):
+                return True
+            self._episode_event.clear()
+            self._episode_event.wait(timeout=0.1)
+        self.node.get_logger().warn(
+            f"Timeout waiting for new episode after id={prev_id} ({timeout}s)"
+        )
+        return False

@@ -18,7 +18,7 @@ stage advance / retreat logic as defined in the base class.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from rclpy.node import Node
 
@@ -47,7 +47,15 @@ class DreamerV3Curriculum(CurriculumBase):
         model.train(..., after_eval_fn=curriculum.after_eval_hook)
     """
 
-    def __init__(self, node: Node, staged_cfg: StagedCfg, num_envs: int, verbose: int = 0):
+    def __init__(
+        self,
+        node: Node,
+        staged_cfg: StagedCfg,
+        num_envs: int,
+        verbose: int = 0,
+        *,
+        tm_dict: Optional[Dict[str, Any]] = None,
+    ):
         """Construct from a ``StagedCfg`` config object.
 
         Args:
@@ -55,6 +63,7 @@ class DreamerV3Curriculum(CurriculumBase):
             staged_cfg: ``StagedCfg`` instance from ``arena_cfg.task.staged``.
             num_envs:   Number of parallel environments (for parameter broadcast).
             verbose:    Verbosity level (0=WARNING, 1=INFO, 2=DEBUG).
+            tm_dict:    Optional ``{tm_robots, tm_obstacles, tm_modules}``.
         """
         # Must be set before CurriculumBase.__init__ because the base
         # constructor calls _apply_curriculum() which may trigger
@@ -76,6 +85,9 @@ class DreamerV3Curriculum(CurriculumBase):
             starting_stage=staged_cfg.starting_stage,
             verbose=verbose,
         )
+
+        if tm_dict:
+            self._queue_episode(tm_dict)
 
     # ── CurriculumBase abstract interface ──────────────────────────────────
 

@@ -13,6 +13,7 @@ from .shared_env_eval_callback import SharedEnvEvalCallback
 if TYPE_CHECKING:
     from ...cfg.sb3_cfg import ArenaCallbacksCfg
 
+
 def _create_stop_training_callbacks(
     threshold_type: str,
     threshold: float,
@@ -104,6 +105,11 @@ def init_sb3_callbacks(
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
             )
+            curriculum_cb._queue_episode({
+                "tm_robots": task_cfg.tm_robots,
+                "tm_obstacles": task_cfg.tm_obstacles,
+                "tm_modules": task_cfg.tm_modules,
+            })
             callbacks.append(curriculum_cb)
 
     # Add stop training callbacks

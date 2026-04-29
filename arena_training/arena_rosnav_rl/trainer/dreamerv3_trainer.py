@@ -167,6 +167,11 @@ class DreamerV3Trainer(ArenaTrainer):
             staged_cfg=task_cfg.staged,
             num_envs=general_cfg.n_envs,
             verbose=int(general_cfg.verbose),
+            tm_dict={
+                "tm_robots": task_cfg.tm_robots,
+                "tm_obstacles": task_cfg.tm_obstacles,
+                "tm_modules": task_cfg.tm_modules,
+            },
         )
         staged = task_cfg.staged
         logger.info(
