@@ -57,15 +57,10 @@ class SupervisorNode(Node):
 
 
 def main(args=None):
+    from arena_rclpy_mixins.spin import spin_node
+
     rclpy.init(args=args)
-    node = SupervisorNode("basic_node")
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    spin_node(SupervisorNode("basic_node"))
 
 
 if __name__ == "__main__":

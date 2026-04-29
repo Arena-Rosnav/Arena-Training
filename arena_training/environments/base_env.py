@@ -1,6 +1,6 @@
 import threading
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from abc import ABC
+from typing import Any, Dict, Optional, Tuple, Union
 
 import gymnasium
 import numpy as np
@@ -16,8 +16,7 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
-from std_srvs.srv import Empty as EmptySrv
-from std_srvs.srv import SetBool as SetBoolSrv
+from task_generator_msgs.srv import Pause as PauseSrv, ResetEpisode
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
@@ -115,7 +114,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # ROS interfaces (initialised in _initialize_environment)
         self._reset_task_srv = None
-        self._pause_sim_srv = None
+        self._pause_srv = None
         self._cmd_vel_pub = None
         self._initialized = False
 
@@ -132,7 +131,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
-            self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
+            self.node.set_parameters(
+                [rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)]
+            )
             self.node.start_spinning()
 
         if self.is_train_mode:
@@ -143,9 +144,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
-        task_srv_name = (self.ns[0] / self.ns[1] / "reset_task").to_string()
+        task_srv_name = (self.ns[0] / self.ns[1] / "lifecycle/reset_episode").to_string()
         self._reset_task_srv = self.node.create_client(
-            EmptySrv,
+            ResetEpisode,
             task_srv_name,
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
@@ -156,18 +157,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 f"Ensure the simulation and task_generator are running."
             )
 
-        pause_srv_name = (self.ns[0] / self.ns[1] / "pause_simulation").to_string()
-        self._pause_sim_srv = self.node.create_client(
-            SetBoolSrv,
+        pause_srv_name = (self.ns[0] / self.ns[1] / "lifecycle/pause").to_string()
+        self._pause_srv = self.node.create_client(
+            PauseSrv,
             pause_srv_name,
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
-        if not self._pause_sim_srv.wait_for_service(timeout_sec=10.0):
+        if not self._pause_srv.wait_for_service(timeout_sec=10.0):
             self.node.get_logger().warn(
                 f"Service '{pause_srv_name}' not available after 10 seconds. "
                 f"Simulation pause/unpause will be disabled."
             )
-            self._pause_sim_srv = None
+            self._pause_srv = None
 
         # Direct cmd_vel publisher — the sole source of velocity commands
         # during training.  Completely bypasses the nav2 controller_server.
@@ -295,7 +296,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             )
             if is_success:
                 # Log world-frame goal position if available in the observation dict.
-                goal, subgoal, robot = obs_dict.get("goal_pose"), obs_dict.get("subgoal_pose"), obs_dict.get("robot_pose")
+                goal = obs_dict.get("goal_pose")
+                subgoal = obs_dict.get("subgoal_pose")
+                robot = obs_dict.get("robot_pose")
                 if goal is not None:
                     msg += f", goal: {goal}"
                 if subgoal is not None:
@@ -363,12 +366,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
         self.observation_collector.shutdown()
-        if getattr(self, "_cmd_vel_pub", None):
+        if self._cmd_vel_pub is not None:
             self.node.destroy_publisher(self._cmd_vel_pub)
-        if getattr(self, "_reset_task_srv", None):
+        if self._reset_task_srv is not None:
             self._reset_task_srv.destroy()
-        if getattr(self, "_pause_sim_srv", None):
-            self._pause_sim_srv.destroy()
+        if self._pause_srv is not None:
+            self._pause_srv.destroy()
 
     def pause(self, paused: bool) -> None:
         """Pause (paused=True) or unpause (paused=False) the physics simulator.
@@ -378,14 +381,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         Gazebo processes it within ~1 ms on localhost, well before any
         significant neural-network computation begins.
         """
-        if not getattr(self, "_pause_sim_srv", None):
+        if self._pause_srv is None:
             return
-        req = SetBoolSrv.Request()
-        req.data = paused
-        self._pause_sim_srv.call_async(req)
+        req = PauseSrv.Request()
+        req.action = PauseSrv.Request.PAUSE if paused else PauseSrv.Request.UNPAUSE
+        self._pause_srv.call_async(req)
 
     def reset_task(self, timeout: float = 10.0, retries: int = 2):
-        """Call the task-generator's reset_task service and **block** until it
+        """Call the task-generator's lifecycle/reset_episode service and **block** until it
         completes (or *timeout* seconds elapse).  Without a successful reset
         the goal/obstacle positions are stale and the episode will terminate
         immediately, so we retry on failure.
@@ -394,7 +397,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             timeout:  Seconds to wait for the service response per attempt.
             retries:  Number of additional attempts after the first failure.
         """
-        if not getattr(self, "_reset_task_srv", None):
+        if self._reset_task_srv is None:
             self.node.get_logger().warn("Reset task service client is not available (client not created).")
             return False
 
@@ -417,13 +420,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             def done_callback(future):
                 try:
                     result = future.result()
-                    result_container["success"] = result is not None
+                    result_container["success"] = result is not None and result.success
+                    if result is not None and not result.success:
+                        result_container["exception"] = result.error_msg
                 except Exception as e:
                     result_container["exception"] = e
                 finally:
                     completion_event.set()
 
-            future = self._reset_task_srv.call_async(EmptySrv.Request())
+            req = ResetEpisode.Request()
+            req.world = ""
+            req.seed = -1
+            future = self._reset_task_srv.call_async(req)
             future.add_done_callback(done_callback)
 
             if completion_event.wait(timeout=timeout):
@@ -442,7 +450,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 future.cancel()
 
         self.node.get_logger().error(
-            "reset_task failed after all retries – episode will use stale goals."
+            "reset_episode failed after all retries – episode will use stale goals."
         )
         return False
 

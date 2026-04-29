@@ -83,6 +83,7 @@ class FlatlandEnv(gymnasium.Env):
         obs_unit_kwargs=None,
         reward_fnc_kwargs=None,
         task_generator_kwargs=None,
+        train_mode: bool = True,
         *args,
         **kwargs,
     ):
@@ -96,7 +97,7 @@ class FlatlandEnv(gymnasium.Env):
         if not self._debug_mode:
             rospy.init_node(f"env_{self.ns.simulation_ns}".replace("/", "_"))
 
-        self._is_train_mode = rospy.get_param_cached("/train_mode", default=True)
+        self._is_train_mode = train_mode
         self._step_size = rospy.get_param_cached("/step_size")
 
         self._reward_fnc = reward_fnc

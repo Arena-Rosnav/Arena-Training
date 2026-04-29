@@ -303,7 +303,7 @@ arena_cfg:
           task.random.interactive.models: []
           task.random.dynamic.models: []
           goal_tolerance_radius: 1.5
-          
+
         # Stage 2: Few static obstacles
         - task.random.static.n: [2, 4]
           task.random.interactive.n: [0, 0]
@@ -312,7 +312,7 @@ arena_cfg:
           task.random.interactive.models: []
           task.random.dynamic.models: []
           goal_tolerance_radius: 1.2
-          
+
         # Stage 3: More static obstacles + first dynamic
         - task.random.static.n: [3, 5]
           task.random.interactive.n: [0, 0]
@@ -321,7 +321,7 @@ arena_cfg:
           task.random.interactive.models: []
           task.random.dynamic.models: [actor1]
           goal_tolerance_radius: 1.0
-          
+
         # Stage 4: Introduce interactive obstacles
         - task.random.static.n: [4, 6]
           task.random.interactive.n: [1, 2]

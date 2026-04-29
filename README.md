@@ -51,22 +51,19 @@ source arena
 
 ### Launching the full stack (recommended)
 
-The easiest way to start training is through `arena launch`. Providing `train_config` automatically implies `train_mode:=true` and launches `train_agent.py` in parallel with the simulation:
+The easiest way to start training is through `arena launch`. Providing `train_config` launches `train_agent.py` in parallel with the simulation and automatically selects managed mode (`auto_reset:=false`):
 
 ```bash
-# Start simulation + training together (train_mode implied)
+# Start simulation + training together
 arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
     train_config:=/path/to/dreamer_training_config.yaml
 
 # Or with a config name - resolved from arena_training/configs/
 arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
     train_config:=dreamer_training_config.yaml
-
-# Start simulation only in train_mode (no trainer process)
-arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 train_mode:=true
 ```
 
-> **Note:** `train_config` and `train_mode` are independent - `train_config` sets up the trainer process, while `train_mode` controls simulation behaviour (direct `cmd_vel` publishing, nav2 controller silenced). Providing `train_config` sets `train_mode` to `true` automatically.
+> **Note:** `train_config:=path` is the only RL-mode entry point. When non-empty, the launch derives `auto_reset:=false` (managed mode) so the training script drives episode transitions via `lifecycle/reset_episode`. The nav2 controller is silenced at the arena_robots adapter layer independently of this flag.
 
 See [`arena_bringup`](../arena_bringup) for all available launch arguments. For agent, observation space, reward and curriculum configuration refer to the [rosnav_rl README](deps/rosnav_rl/README.md).
 
