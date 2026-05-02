@@ -1,8 +1,10 @@
+import posixpath
 import threading
 import time
 from abc import ABC
 from typing import Any, Dict, Optional, Tuple, Union
 
+import arena_robots.Robot
 import gymnasium
 import numpy as np
 import rclpy
@@ -17,8 +19,9 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
-from task_generator_msgs.msg import EpisodeRecord
-from task_generator_msgs.srv import Pause as PauseSrv, ResetEpisode
+from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
+from task_generator_msgs.msg import EpisodeRecord, RobotFleet
+from task_generator_msgs.srv import ResetEpisode
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
@@ -45,7 +48,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     Attributes:
         node (SupervisorNode): The ROS2 node used for communication.
-        ns (Namespace): The ROS2 namespace for the agent.
+        env_ns (Namespace): The env's task_generator_node namespace (lifecycle/state).
+        robot_ns (Namespace): The robot's namespace (cmd_vel, sensor topics). Set by `_resolve_robot`.
         action_space (gymnasium.spaces.Box): The action space, defined by the space manager.
         observation_space (gymnasium.spaces.Dict): The observation space, defined by the space manager.
         is_train_mode (bool): Flag indicating if the environment is in training mode.
@@ -96,7 +100,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """
         super().__init__()
         self.node = node
-        self.ns = Namespace(ns) if isinstance(ns, str) else ns
+        self.env_ns = Namespace(ns) if isinstance(ns, str) else ns
 
         self._is_train_mode = train_mode
         if self.is_train_mode and reward_function is None:
@@ -121,6 +125,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._episode_state_sub = None
         self._latest_episode: Optional[EpisodeRecord] = None
         self._episode_event = threading.Event()
+        self._fleet_sub = None
+        self._latest_fleet: Optional[RobotFleet] = None
+        self._fleet_event = threading.Event()
+        self.robot_ns: Optional[Namespace] = None
+        self.robot_source_frame: Optional[str] = None
         # Set on first step(); reset() blocks here so we don't fire a fresh
         # task_generator reset until the model has cleared its first inference.
         self._ready_event = threading.Event()
@@ -143,12 +152,15 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if self.node is None:
             if not rclpy.ok():
                 rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
-            env_node_name = f"{self.ns.to_string()}_env".replace("/", "_")
+            env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
             self.node.set_parameters(
                 [rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)]
             )
             self.node.start_spinning()
+
+        self._setup_fleet_subscription()
+        self._resolve_robot()
 
         if self.is_train_mode:
             self._setup_ros_services()
@@ -156,9 +168,39 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._setup_observation_manager()
         self._initialized = True
 
+    def _setup_fleet_subscription(self) -> None:
+        robots_topic = (self.env_ns / "state" / "robots").to_string()
+        self._fleet_sub = self.node.create_subscription(
+            RobotFleet,
+            robots_topic,
+            self._on_fleet,
+            qos_profile=rclpy.qos.QoSProfile(
+                depth=1,
+                durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
+    def _on_fleet(self, msg: RobotFleet) -> None:
+        self._latest_fleet = msg
+        self._fleet_event.set()
+
+    def _resolve_robot(self) -> None:
+        robots_topic = (self.env_ns / "state" / "robots").to_string()
+        if not self._fleet_event.wait(timeout=10.0):
+            raise RuntimeError(
+                f"No robots fleet snapshot on '{robots_topic}' after 10s; task_generator did not publish state/robots."
+            )
+        if not self._latest_fleet.robots:
+            raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
+
+        robot = self._latest_fleet.robots[0]
+        self.robot_ns = Namespace(robot.ns)
+        base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
+        self.robot_source_frame = posixpath.join(robot.frame, base_frame)
+
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
-        task_srv_name = (self.ns[0] / self.ns[1] / "lifecycle/reset_episode").to_string()
+        task_srv_name = (self.env_ns / "lifecycle/reset_episode").to_string()
         self._reset_task_srv = self.node.create_client(
             ResetEpisode,
             task_srv_name,
@@ -171,9 +213,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 f"Ensure the simulation and task_generator are running."
             )
 
-        pause_srv_name = (self.ns[0] / self.ns[1] / "lifecycle/pause").to_string()
+        pause_srv_name = "/arena/sim_lifecycle/hold"
         self._pause_srv = self.node.create_client(
-            PauseSrv,
+            LifecycleHoldSrv,
             pause_srv_name,
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
@@ -184,16 +226,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             )
             self._pause_srv = None
 
-        # Direct cmd_vel publisher — the sole source of velocity commands
+        # Direct cmd_vel publisher, the sole source of velocity commands
         # during training.  Completely bypasses the nav2 controller_server.
-        cmd_vel_topic = self.ns("cmd_vel").to_string()
+        cmd_vel_topic = self.robot_ns("cmd_vel").to_string()
         self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
         self.node.get_logger().info(
             f"Created direct cmd_vel publisher at: {cmd_vel_topic}"
         )
 
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
-        episode_topic = (self.ns[0] / self.ns[1] / "state" / "episode").to_string()
+        episode_topic = (self.env_ns / "state" / "episode").to_string()
         self._episode_state_sub = self.node.create_subscription(
             EpisodeRecord,
             episode_topic,
@@ -221,11 +263,15 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         with open(obs_config_path, "r") as file:
             config = yaml.safe_load(file)
 
+        for ds in config.get("datasources", {}).values():
+            if ds.get("type") == "RobotPoseTFGenerator":
+                ds.setdefault("params", {})["source_frame"] = self.robot_source_frame
+
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
             config=config,
             node=self.node,
-            ns=self.ns.to_string(),
+            ns=self.robot_ns.to_string(),
             simulation_state_container=self.__agent_parameters,
             wait_for_obs=self.__wait_for_obs,  # Wait for topics to be available
         )
@@ -328,7 +374,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             is_success = info.get("is_success", False)
             episode_id = self._latest_episode.episode_id if self._latest_episode else self._episode
             msg = (
-                f"[{self.ns.to_string()}] Episode {episode_id} ended — "
+                f"[{self.env_ns.to_string()}] Episode {episode_id} ended — "
                 f"reason: {done_reason}, steps: {self._steps_curr_episode}, "
                 f"reward: {reward:.3f}"
             )
@@ -375,17 +421,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.__is_first_step = True
 
             if not self._first_reset_done:
-                # First reset: don't trigger reset_task (task_generator may not
-                # have finished setup yet — its setup() ends with _spawn_episode
-                # which auto-spawns the first episode). Just wait for that
-                # auto-spawned episode to be published.
-                self.node.get_logger().info(
-                    f"[{self.ns.to_string()}] Waiting for task_generator's first episode..."
-                )
-                if not self._wait_for_new_episode(prev_id=0, timeout=60.0):
-                    self.node.get_logger().warn(
-                        "Did not see a fresh first episode within 60 s; proceeding."
-                    )
+                # First reset: fleet arrived during init, so the robot exists.
+                # Don't call reset_task, task_generator is mid-_reset_episode.
+                # Episode_state may not be published yet, that's fine, step()
+                # tolerates _latest_episode is None and picks it up async.
                 self._first_reset_done = True
                 self._episode = (
                     self._latest_episode.episode_id if self._latest_episode is not None else 1
@@ -402,7 +441,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 # inference (compile pass), so the pause/unpause loop is reliable.
                 if not self._ready_event.is_set():
                     self.node.get_logger().info(
-                        f"[{self.ns.to_string()}] Holding reset until model is loaded..."
+                        f"[{self.env_ns.to_string()}] Holding reset until model is loaded..."
                     )
                     if not self._ready_event.wait(timeout=120.0):
                         self.node.get_logger().warn(
@@ -412,7 +451,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 prev_id = self._latest_episode.episode_id if self._latest_episode is not None else 0
 
                 self.node.get_logger().info(
-                    f"[{self.ns.to_string()}] Resetting environment after episode {prev_id}..."
+                    f"[{self.env_ns.to_string()}] Resetting environment after episode {prev_id}..."
                 )
 
                 self._before_task_reset()
@@ -494,8 +533,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def _fire_pause_request(self, paused: bool) -> None:
         if self._pause_srv is None:
             return
-        req = PauseSrv.Request()
-        req.action = PauseSrv.Request.PAUSE if paused else PauseSrv.Request.UNPAUSE
+        req = LifecycleHoldSrv.Request()
+        req.caller_id = self.node.get_fully_qualified_name()
+        req.reason = "training_env_pause"
+        req.action = LifecycleHoldSrv.Request.ACQUIRE if paused else LifecycleHoldSrv.Request.RELEASE
         self._pause_srv.call_async(req)
 
     def reset_task(self, timeout: float = 10.0, retries: int = 2):

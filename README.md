@@ -51,33 +51,45 @@ source arena
 
 ### Launching the full stack (recommended)
 
-The easiest way to start training is through `arena launch`. Providing `train_config` launches `train_agent.py` in parallel with the simulation and automatically selects managed mode (`auto_reset:=false`):
+`arena train` brings up arena and training in one step. It runs [`launch/training.launch.py`](launch/training.launch.py), which includes `arena_bringup/launch/arena.launch.py` (with `env_n:=0`, so arena_node does not auto-spawn) and starts `train_agent.py`. The training script reads `n_envs` from the config YAML and spawns envs via `/arena/spawn_env`.
 
 ```bash
-# Start simulation + training together
-arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
-    train_config:=/path/to/dreamer_training_config.yaml
+# Config name resolved from arena_training/configs/
+arena train sim:=gazebo local_planner:=rosnav_rl train_config:=dreamer_training_config.yaml
 
-# Or with a config name - resolved from arena_training/configs/
-arena launch sim:=gazebo local_planner:=rosnav_rl env_n:=2 \
-    train_config:=dreamer_training_config.yaml
+# Or absolute path
+arena train sim:=gazebo local_planner:=rosnav_rl train_config:=/path/to/dreamer_training_config.yaml
 ```
 
-> **Note:** `train_config:=path` is the only RL-mode entry point. When non-empty, the launch derives `auto_reset:=false` (managed mode) so the training script drives episode transitions via `lifecycle/reset_episode`. The nav2 controller is silenced at the arena_robots adapter layer independently of this flag.
+All launch args (`sim`, `world`, `robot`, `local_planner`, …) flow through to `arena.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). `env_n` on the CLI is force-overridden to 0; control fleet size by setting `arena_cfg.general.n_envs` in the YAML.
+
+`arena train` is sugar for `arena feature training launch ...` (which itself wraps `ros2 launch arena_training training.launch.py`); both require the `training` Docker feature to be installed (`arena feature training install`).
 
 See [`arena_bringup`](../arena_bringup) for all available launch arguments. For agent, observation space, reward and curriculum configuration refer to the [rosnav_rl README](deps/rosnav_rl/README.md).
 
+### Standalone launch file
+
+If you want to bypass the `arena` CLI (e.g. when running inside an already-set-up environment, or driving from another launch file), invoke the launch file directly:
+
+```bash
+ros2 launch arena_training training.launch.py sim:=gazebo local_planner:=rosnav_rl train_config:=dreamer_training_config.yaml
+```
+
+Same arg surface as `arena train` — the CLI verb is just a thin wrapper.
+
 ### Training script (standalone)
+
+For development without a simulator (no env spawning, no service calls), invoke the script directly. This runs the trainer logic against whatever envs already exist; `train_agent.py` will fail at `/arena/spawn_env` if arena_node is not running.
 
 ```bash
 # Default config (sb_training_config.yaml)
-ros2 run arena_training train_agent
+ros2 run arena_training train_agent.py
 
 # Specific config by name — resolved from arena_training/configs/
-ros2 run arena_training train_agent --config dreamer_training_config.yaml
+ros2 run arena_training train_agent.py --config dreamer_training_config.yaml
 
 # Absolute path
-ros2 run arena_training train_agent --config /path/to/my_config.yaml
+ros2 run arena_training train_agent.py --config /path/to/my_config.yaml
 ```
 
 Config resolution order:

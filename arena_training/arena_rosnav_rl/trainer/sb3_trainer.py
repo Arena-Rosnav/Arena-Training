@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 from functools import partial
 
-import rclpy
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from ..cfg import sb3_cfg as arena_cfg
 from ..utils import paths as Paths
 from ...environments.wrappers import TimeSyncWrapper
 from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
-from ..utils.config import load_training_config
 from ..utils.env_factory import make_envs, sb3_wrap_env
 from ..utils.monitoring import setup_wandb
 from .arena_trainer import (
@@ -16,8 +14,6 @@ from .arena_trainer import (
     SupportedRLFrameworks,
     TrainingHookStages,
 )
-
-from stable_baselines3.ppo import PPO
 
 
 @dataclass
@@ -167,7 +163,7 @@ class StableBaselines3Trainer(ArenaTrainer):
             n_envs=self.config.arena_cfg.general.n_envs,
             max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
             init_env_by_call=False,
-            namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
+            namespace_fn=self.namespace_fn,
             simulation_state_container=self.agent_parameters,
             wrappers=[partial(TimeSyncWrapper, control_hz=self.config.arena_cfg.general.control_hz)],
             observations_config=self.config.agent_config.observations_config,
@@ -261,17 +257,3 @@ class StableBaselines3Trainer(ArenaTrainer):
         self.agent.model.environment = train_env
 
 
-def main():
-    rclpy.init()
-    _config_path = Path(__file__).resolve().parents[3] / "configs" / "sb_training_config.yaml"
-    config = load_training_config(str(_config_path))
-
-    trainer = StableBaselines3Trainer(config)
-
-    trainer.train()
-    trainer.close()
-    rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

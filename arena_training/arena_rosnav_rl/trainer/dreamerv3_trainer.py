@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from typing import List, Optional
@@ -9,7 +10,6 @@ import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
 from rosnav_rl import SupportedRLFrameworks
 
-from ..utils.config import load_training_config
 from ..utils.env_factory import make_envs
 from ..utils.monitoring import setup_wandb
 from ..trainer.arena_trainer import ArenaTrainer
@@ -56,8 +56,8 @@ class DreamerV3Trainer(ArenaTrainer):
     environment: DreamerV3Environment
     _curriculum: Optional["DreamerV3Curriculum"] = None
 
-    def __init__(self, config: arena_cfg.TrainingCfg):
-        super().__init__(config, config.resume)
+    def __init__(self, config: arena_cfg.TrainingCfg, namespace_fn: Callable[[int], str]):
+        super().__init__(config, config.resume, namespace_fn=namespace_fn)
 
     def _setup_monitoring(self, *args, **kwargs):
         """Set up monitoring tools (Weights & Biases) if enabled."""
@@ -120,7 +120,7 @@ class DreamerV3Trainer(ArenaTrainer):
             n_envs=general_cfg.n_envs,
             max_steps=general_cfg.max_num_moves_per_eps,
             init_env_by_call=False,
-            namespace_fn=lambda idx: f"/task_generator_node/env{idx}/jackal",
+            namespace_fn=self.namespace_fn,
             simulation_state_container=self.agent_parameters,
             wrappers=[
                 partial(TimeSyncWrapper, control_hz=general_cfg.control_hz),
@@ -213,9 +213,3 @@ class DreamerV3Trainer(ArenaTrainer):
         )
         logger.info("[Train] Training complete.")
 
-
-if __name__ == "__main__":
-    config = load_training_config("dreamer_training_config.yaml")
-
-    trainer = DreamerV3Trainer(config)
-    trainer.train()

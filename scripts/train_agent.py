@@ -13,6 +13,7 @@ Usage:
     python3 train_agent.py --config /path/to/config.yaml
 """
 
+import asyncio
 import sys
 import logging
 import threading
@@ -22,9 +23,11 @@ import torch
 import rclpy
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
+from arena_runtime_msgs.srv import SpawnEnv
+
+from arena_rclpy_mixins.Async import AsyncNode, ClientWrapper
 
 # Import arena_training subpackages
-from arena_training.arena_rosnav_rl.cfg import TrainingCfg
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 from arena_training.arena_rosnav_rl.trainer import get_trainer
@@ -38,6 +41,62 @@ logger = logging.getLogger(__name__)
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
 # torch._dynamo.config.disable = True
+
+
+async def _spawn_envs(
+    n_envs: int,
+    per_env_launch_args: list[list[str]],
+) -> dict[int, str]:
+    """Call /arena/spawn_env n_envs times in parallel; returns idx -> ns map."""
+    node = AsyncNode("_spawn_envs_node")
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+
+    try:
+        cli: ClientWrapper = node.create_client_wrapper(
+            SpawnEnv, "/arena/spawn_env", timeout=300.0
+        )
+        node.get_logger().info("waiting for /arena/spawn_env")
+        await cli.ensure()
+        node.get_logger().info("/arena/spawn_env is ready")
+
+        async def _one(idx: int) -> tuple[int, str]:
+            req = SpawnEnv.Request()
+            req.headless = True
+            req.launch_args = list(per_env_launch_args[idx])
+            resp = await cli.call_timeout(req)
+            if resp is None:
+                raise RuntimeError(f"SpawnEnv {idx} timed out")
+            if not resp.success:
+                raise RuntimeError(f"SpawnEnv {idx} failed: {resp.error_msg}")
+            node.get_logger().info(f"env {idx} spawned at {resp.ns}")
+            return idx, resp.ns
+
+        results = await asyncio.gather(
+            *[_one(i) for i in range(n_envs)], return_exceptions=True
+        )
+        env_map: dict[int, str] = {}
+        errors: list[BaseException] = []
+        for r in results:
+            if isinstance(r, BaseException):
+                errors.append(r)
+                node.get_logger().error(f"spawn failed: {r!r}")
+            else:
+                idx, ns = r
+                env_map[idx] = ns
+        if errors:
+            raise RuntimeError(f"{len(errors)}/{n_envs} envs failed to spawn") from errors[0]
+        return env_map
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+
+
+def spawn_envs(n_envs: int, per_env_launch_args: list[list[str]]) -> dict[int, str]:
+    """Synchronous entry point: spawn N envs and return idx -> ns map."""
+    return asyncio.run(_spawn_envs(n_envs, per_env_launch_args))
 
 
 def wait_for_simulation(timeout: float = 120.0) -> bool:
@@ -60,7 +119,7 @@ def wait_for_simulation(timeout: float = 120.0) -> bool:
     def _cb(msg: Clock):
         event.set()
 
-    sub = node.create_subscription(Clock, "/clock", _cb, 1)
+    node.create_subscription(Clock, "/clock", _cb, 1)
 
     # Spin in a background thread so the subscription can receive
     executor = rclpy.executors.SingleThreadedExecutor()
@@ -196,7 +255,7 @@ def main():
         config_path = get_config_path(args)
 
         logger.info(f"\n{'='*70}")
-        logger.info(f"  Arena Training Pipeline")
+        logger.info("  Arena Training Pipeline")
         logger.info(f"{'='*70}")
         logger.info(f"  Configuration: {config_path}")
         logger.info(f"{'='*70}\n")
@@ -213,9 +272,21 @@ def main():
 
         logger.info("Configuration loaded successfully")
 
+        # Spawn environments before constructing the trainer
+        assert config.arena_cfg.general is not None
+        n_envs: int = config.arena_cfg.general.n_envs
+        per_env_launch_args = [["train_mode:=true"] for _ in range(n_envs)]
+        logger.info("Spawning %d training environment(s)...", n_envs)
+        env_map = spawn_envs(n_envs, per_env_launch_args)
+        logger.info("All %d environment(s) ready: %s", n_envs, env_map)
+
         # Create the appropriate trainer based on the framework
         logger.info("Initializing trainer for framework: %s", config.agent_config.framework.name)
-        trainer = get_trainer(config)
+
+        def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
+            return m[idx]
+
+        trainer = get_trainer(config, namespace_fn=namespace_fn)
 
         # Start training
         logger.info("Starting training process...")

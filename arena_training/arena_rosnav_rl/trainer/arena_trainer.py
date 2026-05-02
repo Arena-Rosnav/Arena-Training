@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Type
 
@@ -68,16 +69,24 @@ class ArenaTrainer(ABC):
     hook_manager: HookManager = HookManager()
 
     @bind_hooks(before_stage=TrainingHookStages.ON_INIT)
-    def __init__(self, config: arena_cfg.TrainingCfg, resume: bool = False) -> None:
+    def __init__(
+        self,
+        config: arena_cfg.TrainingCfg,
+        resume: bool = False,
+        namespace_fn: Callable[[int], str] = None,
+    ) -> None:
         """
         Initializes the ArenaTrainer with the given configuration.
 
         Args:
             config (TrainingCfg): The configuration object for training.
         """
+        if namespace_fn is None:
+            raise ValueError("namespace_fn is required")
         self._validate_config(config)
         self.config = config
         self.__resume = resume
+        self.namespace_fn = namespace_fn
 
         self._setup_supervisor_node()
 
