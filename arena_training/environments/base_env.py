@@ -59,6 +59,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     metadata = {"render_modes": ["human"]}
 
+    _TIMEOUT_PARAM_DEFAULTS = {
+        "reset_task_timeout": -1.0,
+        "service_wait_timeout": -1.0,
+        "episode_wait_timeout": -1.0,
+        "fleet_wait_timeout": -1.0,
+    }
+
     def __init__(
         self,
         ns: Union[str, Namespace],
@@ -159,6 +166,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             )
             self.node.start_spinning()
 
+        self._declare_timeout_params()
+
         self._setup_fleet_subscription()
         self._resolve_robot()
 
@@ -186,9 +195,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _resolve_robot(self) -> None:
         robots_topic = (self.env_ns / "state" / "robots").to_string()
-        if not self._fleet_event.wait(timeout=10.0):
+        if not self._fleet_event.wait(timeout=self._timeout_param("fleet_wait_timeout")):
             raise RuntimeError(
-                f"No robots fleet snapshot on '{robots_topic}' after 10s; task_generator did not publish state/robots."
+                f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots."
             )
         if not self._latest_fleet.robots:
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
@@ -207,9 +216,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        if not self._reset_task_srv.wait_for_service(timeout_sec=10.0):
+        service_wait = self._timeout_param("service_wait_timeout")
+        if not self._reset_task_srv.wait_for_service(timeout_sec=service_wait):
             self.node.get_logger().warn(
-                f"Service '{task_srv_name}' not available after 10 seconds. "
+                f"Service '{task_srv_name}' not available. "
                 f"Ensure the simulation and task_generator are running."
             )
 
@@ -221,7 +231,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
         if not self._pause_srv.wait_for_service(timeout_sec=10.0):
             self.node.get_logger().warn(
-                f"Service '{pause_srv_name}' not available after 10 seconds. "
+                f"Service '{pause_srv_name}' not available after 10s. "
                 f"Simulation pause/unpause will be disabled."
             )
             self._pause_srv = None
@@ -246,6 +256,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             ),
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
+
+    def _declare_timeout_params(self) -> None:
+        for name, default in self._TIMEOUT_PARAM_DEFAULTS.items():
+            if not self.node.has_parameter(name):
+                self.node.declare_parameter(name, default)
+
+    def _timeout_param(self, name: str) -> Optional[float]:
+        """Read a timeout ROS param. Negative sentinel means infinite (None)."""
+        val = self.node.get_parameter(name).value
+        return None if val < 0 else float(val)
 
     def _setup_observation_manager(self):
         """Configures and initializes the ObservationManager."""
@@ -361,7 +381,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             max_steps=self._max_steps_per_episode,
         )
         tg = self._latest_episode
-        if tg is not None and tg.outcome_state != EpisodeRecord.UNFINISHED:
+        if tg is not None and tg.outcome_state not in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
             done = True
             info["done_reason"] = tg.outcome_reason or f"task_generator:{tg.outcome_state}"
             info["is_success"] = int(tg.outcome_state == EpisodeRecord.SUCCESS)
@@ -421,17 +441,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.__is_first_step = True
 
             if not self._first_reset_done:
-                # First reset: fleet arrived during init, so the robot exists.
-                # Don't call reset_task, task_generator is mid-_reset_episode.
-                # Episode_state may not be published yet, that's fine, step()
-                # tolerates _latest_episode is None and picks it up async.
+                # Managed mode: task_generator does not auto-spawn episode 1
+                # on activate (auto_reset=false), drive the first reset here.
                 self._first_reset_done = True
+                self._before_task_reset()
+                self.reset_task()
+                self._wait_for_new_episode(prev_id=0)
+                self._after_task_reset()
                 self._episode = (
                     self._latest_episode.episode_id if self._latest_episode is not None else 1
                 )
             elif (
                 self._latest_episode is not None
-                and self._latest_episode.outcome_state == EpisodeRecord.UNFINISHED
+                and self._latest_episode.outcome_state == EpisodeRecord.QUEUED
                 and steps_this_episode == 0
             ):
                 # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
@@ -456,7 +478,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
                 self._before_task_reset()
                 self.reset_task()
-                self._wait_for_new_episode(prev_id, timeout=10.0)
+                self._wait_for_new_episode(prev_id)
                 self._after_task_reset()
                 self._episode = (
                     self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
@@ -539,27 +561,28 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         req.action = LifecycleHoldSrv.Request.ACQUIRE if paused else LifecycleHoldSrv.Request.RELEASE
         self._pause_srv.call_async(req)
 
-    def reset_task(self, timeout: float = 10.0, retries: int = 2):
-        """Call the task-generator's lifecycle/reset_episode service and **block** until it
-        completes (or *timeout* seconds elapse).  Without a successful reset
-        the goal/obstacle positions are stale and the episode will terminate
-        immediately, so we retry on failure.
+    def reset_task(self, timeout: Optional[float] = None, retries: int = 2):
+        """Call task-generator's lifecycle/reset_episode and block until it completes.
 
         Args:
-            timeout:  Seconds to wait for the service response per attempt.
+            timeout:  Per-attempt seconds; None reads `reset_task_timeout` param.
             retries:  Number of additional attempts after the first failure.
         """
+        if timeout is None:
+            timeout = self._timeout_param("reset_task_timeout")
         if self._reset_task_srv is None:
             self.node.get_logger().warn("Reset task service client is not available (client not created).")
             return False
 
         if not self._reset_task_srv.service_is_ready():
             self.node.get_logger().warn(
-                "Reset task service not ready — waiting up to 10 s for task_generator..."
+                "Reset task service not ready, waiting for task_generator..."
             )
-            if not self._reset_task_srv.wait_for_service(timeout_sec=10.0):
+            if not self._reset_task_srv.wait_for_service(
+                timeout_sec=self._timeout_param("service_wait_timeout")
+            ):
                 self.node.get_logger().error(
-                    "Reset task service still unavailable after 10 s. "
+                    "Reset task service still unavailable. "
                     "Episode will use stale goal. "
                     "Verify that the simulation and task_generator are running."
                 )
@@ -618,15 +641,17 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._latest_episode = msg
         self._episode_event.set()
 
-    def _wait_for_new_episode(self, prev_id: int, timeout: float) -> bool:
-        """Block until task_generator publishes a fresh UNFINISHED episode."""
-        deadline = time.monotonic() + timeout
+    def _wait_for_new_episode(self, prev_id: int, timeout: Optional[float] = None) -> bool:
+        """Block until task_generator publishes a fresh QUEUED episode."""
+        if timeout is None:
+            timeout = self._timeout_param("episode_wait_timeout")
+        deadline = float("inf") if timeout is None else time.monotonic() + timeout
         while time.monotonic() < deadline:
             tg = self._latest_episode
             if (
                 tg is not None
                 and tg.episode_id > prev_id
-                and tg.outcome_state == EpisodeRecord.UNFINISHED
+                and tg.outcome_state == EpisodeRecord.QUEUED
             ):
                 return True
             self._episode_event.clear()

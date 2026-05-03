@@ -24,7 +24,7 @@ def generate_launch_description():
                 'launch', 'arena.launch.py',
             ]),
         ),
-        overrides={'env_n': '0'},
+        overrides={'env_n': '0', 'auto_reset': 'false'},
     )
 
     train_agent = ExecuteProcess(
