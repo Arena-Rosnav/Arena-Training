@@ -383,7 +383,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         tg = self._latest_episode
         if tg is not None and tg.outcome_state not in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
             done = True
-            info["done_reason"] = tg.outcome_reason or f"task_generator:{tg.outcome_state}"
+            info["done_reason"] = tg.outcome_info or f"task_generator:{tg.outcome_state}"
             info["is_success"] = int(tg.outcome_state == EpisodeRecord.SUCCESS)
             info["episode_length"] = self._steps_curr_episode
         obs_dict["is_terminal"] = done
