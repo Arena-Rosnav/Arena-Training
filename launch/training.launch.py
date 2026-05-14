@@ -21,10 +21,9 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
                 FindPackageShare('arena_bringup'),
-                'launch', 'arena.launch.py',
+                'launch', 'arena_runtime.launch.py',
             ]),
         ),
-        overrides={'env_n': '0', 'auto_reset': 'false'},
     )
 
     train_agent = ExecuteProcess(

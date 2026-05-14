@@ -51,7 +51,7 @@ source arena
 
 ### Launching the full stack (recommended)
 
-`arena train` brings up arena and training in one step. It runs [`launch/training.launch.py`](launch/training.launch.py), which includes `arena_bringup/launch/arena.launch.py` (with `env_n:=0`, so arena_node does not auto-spawn) and starts `train_agent.py`. The training script reads `n_envs` from the config YAML and spawns envs via `/arena/spawn_env`.
+`arena train` brings up arena and training in one step. It runs [`launch/training.launch.py`](launch/training.launch.py), which includes `arena_bringup/launch/arena_runtime.launch.py` (runtime-only, no auto-spawn) and starts `train_agent.py`. The training script reads `n_envs` from the config YAML and spawns envs via `/arena/spawn_env`.
 
 ```bash
 # Config name resolved from arena_training/configs/
@@ -61,7 +61,7 @@ arena train sim:=gazebo local_planner:=rosnav_rl train_config:=dreamer_training_
 arena train sim:=gazebo local_planner:=rosnav_rl train_config:=/path/to/dreamer_training_config.yaml
 ```
 
-All launch args (`sim`, `world`, `robot`, `local_planner`, …) flow through to `arena.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). `env_n` on the CLI is force-overridden to 0; control fleet size by setting `arena_cfg.general.n_envs` in the YAML.
+All launch args (`sim`, `world`, `robot`, `local_planner`, …) flow through to `arena_runtime.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). Fleet size is controlled by `arena_cfg.general.n_envs` in the YAML.
 
 `arena train` is sugar for `arena feature training launch ...` (which itself wraps `ros2 launch arena_training training.launch.py`); both require the `training` Docker feature to be installed (`arena feature training install`).
 
