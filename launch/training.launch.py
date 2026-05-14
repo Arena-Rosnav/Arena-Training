@@ -13,7 +13,6 @@ def generate_launch_description():
 
     train_config = LaunchArgument(
         name='train_config',
-        default_value='',
         description='Path to training config YAML.',
     )
 
