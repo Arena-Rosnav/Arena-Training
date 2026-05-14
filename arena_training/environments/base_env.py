@@ -1,3 +1,4 @@
+import logging
 import posixpath
 import threading
 import time
@@ -31,6 +32,8 @@ from arena_training.arena_rosnav_rl.utils.envs import (
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
 from rosnav_rl.utils.logging import flush_errors_decorator
+
+_init_log = logging.getLogger("arena_training.init")
 
 
 class ArenaBaseEnv(ABC, gymnasium.Env):
@@ -156,9 +159,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if self._initialized:
             return  # Already initialized
 
+        tag = f"[env {self.env_ns.to_string()}]"
+
         if self.node is None:
             if not rclpy.ok():
-                rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
+                rclpy.init()
             env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
             self.node.set_parameters(
@@ -167,14 +172,20 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.node.start_spinning()
 
         self._declare_timeout_params()
-
         self._setup_fleet_subscription()
+
+        t0 = time.monotonic()
         self._resolve_robot()
+        _init_log.info("%s robot resolved ns=%s in %.1fs", tag, self.robot_ns, time.monotonic() - t0)
 
         if self.is_train_mode:
+            t0 = time.monotonic()
             self._setup_ros_services()
+            _init_log.info("%s ROS services up in %.1fs", tag, time.monotonic() - t0)
 
+        t0 = time.monotonic()
         self._setup_observation_manager()
+        _init_log.info("%s observation manager ready in %.1fs", tag, time.monotonic() - t0)
         self._initialized = True
 
     def _setup_fleet_subscription(self) -> None:
@@ -195,9 +206,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _resolve_robot(self) -> None:
         robots_topic = (self.env_ns / "state" / "robots").to_string()
-        if not self._fleet_event.wait(timeout=self._timeout_param("fleet_wait_timeout")):
-            raise RuntimeError(
-                f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots."
+        timeout = self._timeout_param("fleet_wait_timeout")
+        deadline = float("inf") if timeout is None else time.monotonic() + timeout
+        heartbeat = 30.0
+        elapsed = 0.0
+        while not self._fleet_event.wait(timeout=heartbeat):
+            elapsed += heartbeat
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots."
+                )
+            _init_log.warning(
+                "[env %s] still waiting for fleet on '%s' (%.0fs)",
+                self.env_ns.to_string(), robots_topic, elapsed,
             )
         if not self._latest_fleet.robots:
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
@@ -217,10 +238,20 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
         service_wait = self._timeout_param("service_wait_timeout")
-        if not self._reset_task_srv.wait_for_service(timeout_sec=service_wait):
-            self.node.get_logger().warn(
-                f"Service '{task_srv_name}' not available. "
-                f"Ensure the simulation and task_generator are running."
+        deadline = float("inf") if service_wait is None else time.monotonic() + service_wait
+        heartbeat = 30.0
+        elapsed = 0.0
+        while not self._reset_task_srv.wait_for_service(timeout_sec=heartbeat):
+            elapsed += heartbeat
+            if time.monotonic() >= deadline:
+                self.node.get_logger().warn(
+                    f"Service '{task_srv_name}' not available. "
+                    f"Ensure the simulation and task_generator are running."
+                )
+                break
+            _init_log.warning(
+                "[env %s] still waiting for service '%s' (%.0fs)",
+                self.env_ns.to_string(), task_srv_name, elapsed,
             )
 
         pause_srv_name = "/arena/sim_lifecycle/hold"
@@ -359,6 +390,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # First step() means agent inference returned at least once: model is loaded.
         if not self._ready_event.is_set():
+            _init_log.info(
+                "[env %s] first step complete, entering rollout loop",
+                self.env_ns.to_string(),
+            )
             self._ready_event.set()
 
         # Publish velocity command directly — no nav2 controller dependency.
@@ -443,17 +478,22 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             if not self._first_reset_done:
                 # Managed mode: task_generator does not auto-spawn episode 1
                 # on activate (auto_reset=false), drive the first reset here.
+                ns_str = self.env_ns.to_string()
+                t_reset = time.monotonic()
                 self._first_reset_done = True
                 self._before_task_reset()
                 self.reset_task()
                 self._wait_for_new_episode(prev_id=0)
                 self._after_task_reset()
+                _init_log.info(
+                    "[env %s] first reset complete in %.1fs", ns_str, time.monotonic() - t_reset,
+                )
                 self._episode = (
                     self._latest_episode.episode_id if self._latest_episode is not None else 1
                 )
             elif (
                 self._latest_episode is not None
-                and self._latest_episode.outcome_state == EpisodeRecord.QUEUED
+                and self._latest_episode.outcome_state == EpisodeRecord.RUNNING
                 and steps_this_episode == 0
             ):
                 # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
@@ -642,7 +682,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._episode_event.set()
 
     def _wait_for_new_episode(self, prev_id: int, timeout: Optional[float] = None) -> bool:
-        """Block until task_generator publishes a fresh QUEUED episode."""
+        """Block until task_generator publishes a fresh RUNNING episode on state/episode."""
         if timeout is None:
             timeout = self._timeout_param("episode_wait_timeout")
         deadline = float("inf") if timeout is None else time.monotonic() + timeout
@@ -651,7 +691,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             if (
                 tg is not None
                 and tg.episode_id > prev_id
-                and tg.outcome_state == EpisodeRecord.QUEUED
+                and tg.outcome_state == EpisodeRecord.RUNNING
             ):
                 return True
             self._episode_event.clear()

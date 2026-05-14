@@ -17,10 +17,13 @@ import asyncio
 import sys
 import logging
 import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
 import rclpy
+import rclpy.qos
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from arena_runtime_msgs.srv import SpawnEnv
@@ -37,6 +40,15 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _stage(label: str):
+    t0 = time.monotonic()
+    try:
+        yield
+    finally:
+        logger.info("%s done in %.1fs", label, time.monotonic() - t0)
 
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
@@ -66,12 +78,15 @@ async def _spawn_envs(
             req = SpawnEnv.Request()
             req.headless = True
             req.launch_args = list(per_env_launch_args[idx])
+            t_call = time.monotonic()
             resp = await cli.call_timeout(req)
             if resp is None:
                 raise RuntimeError(f"SpawnEnv {idx} timed out")
             if not resp.success:
                 raise RuntimeError(f"SpawnEnv {idx} failed: {resp.error_msg}")
-            node.get_logger().info(f"env {idx} spawned at {resp.ns}")
+            node.get_logger().info(
+                f"env {idx} spawned at {resp.ns} in {time.monotonic() - t_call:.1f}s"
+            )
             return idx, resp.ns
 
         results = await asyncio.gather(
@@ -119,7 +134,15 @@ def wait_for_simulation(timeout: float = 120.0) -> bool:
     def _cb(msg: Clock):
         event.set()
 
-    node.create_subscription(Clock, "/clock", _cb, 1)
+    # Gazebo publishes /clock with BEST_EFFORT reliability. A default (RELIABLE)
+    # subscription is QoS-incompatible and silently drops every message, which
+    # used to burn the full 120s timeout.
+    clock_qos = rclpy.qos.QoSProfile(
+        depth=1,
+        reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
+        history=rclpy.qos.HistoryPolicy.KEEP_LAST,
+    )
+    node.create_subscription(Clock, "/clock", _cb, clock_qos)
 
     # Spin in a background thread so the subscription can receive
     executor = rclpy.executors.SingleThreadedExecutor()
@@ -241,17 +264,16 @@ def main():
     Returns:
         int: Exit code (0 for success, 1 for error)
     """
+    overall_t0 = time.monotonic()
     try:
-        # Parse command-line arguments
         args, _ = parse_training_args()
 
-        # Validate environment
-        validate_environment()
+        with _stage("validate_environment"):
+            validate_environment()
 
-        # Wait for the simulation to be fully loaded before proceeding
-        wait_for_simulation(timeout=120.0)
+        with _stage("wait_for_simulation"):
+            wait_for_simulation(timeout=120.0)
 
-        # Get the full path to the configuration file
         config_path = get_config_path(args)
 
         logger.info(f"\n{'='*70}")
@@ -260,36 +282,33 @@ def main():
         logger.info(f"  Configuration: {config_path}")
         logger.info(f"{'='*70}\n")
 
-        # Load training configuration from YAML file
-        logger.info("Loading training configuration...")
-        config = load_training_config(str(config_path))
+        with _stage("load_training_config"):
+            config = load_training_config(str(config_path))
 
-        # Override robot model if provided via CLI
-        if args.robot:
-            config.arena_cfg.robot.robot_model = args.robot
-            config.arena_cfg.robot.robot_description = None
-            config.arena_cfg.robot.model_post_init(None)
+            if args.robot:
+                config.arena_cfg.robot.robot_model = args.robot
+                config.arena_cfg.robot.robot_description = None
+                config.arena_cfg.robot.model_post_init(None)
 
-        logger.info("Configuration loaded successfully")
-
-        # Spawn environments before constructing the trainer
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
-        per_env_launch_args = [["train_mode:=true"] for _ in range(n_envs)]
-        logger.info("Spawning %d training environment(s)...", n_envs)
-        env_map = spawn_envs(n_envs, per_env_launch_args)
-        logger.info("All %d environment(s) ready: %s", n_envs, env_map)
+        per_env_launch_args = [["train_mode:=true", "auto_reset:=false"] for _ in range(n_envs)]
 
-        # Create the appropriate trainer based on the framework
-        logger.info("Initializing trainer for framework: %s", config.agent_config.framework.name)
+        with _stage(f"spawn_envs (n={n_envs})"):
+            env_map = spawn_envs(n_envs, per_env_launch_args)
+
+        logger.info("building trainer for framework=%s", config.agent_config.framework.name)
 
         def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
             return m[idx]
 
-        trainer = get_trainer(config, namespace_fn=namespace_fn)
+        with _stage("get_trainer (agent + envs + model)"):
+            trainer = get_trainer(config, namespace_fn=namespace_fn)
 
-        # Start training
-        logger.info("Starting training process...")
+        logger.info(
+            "full init complete in %.1fs, entering train loop",
+            time.monotonic() - overall_t0,
+        )
         trainer.train()
 
         logger.info("Training completed successfully!")

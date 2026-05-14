@@ -1,3 +1,5 @@
+import logging
+import time
 from dataclasses import dataclass
 from functools import partial
 
@@ -14,6 +16,8 @@ from .arena_trainer import (
     SupportedRLFrameworks,
     TrainingHookStages,
 )
+
+_init_log = logging.getLogger("arena_training.init")
 
 
 @dataclass
@@ -109,7 +113,9 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
         import rosnav_rl
 
+        t0 = time.monotonic()
         self.agent = rosnav_rl.RL_Agent(self.config.agent_config)
+        _init_log.debug("RL_Agent ready in %.1fs", time.monotonic() - t0)
 
     def _setup_environment(self) -> None:
         """Sets up the training environment.
@@ -124,9 +130,18 @@ class StableBaselines3Trainer(ArenaTrainer):
             None
         """
         self._configure_verbose(self.config.arena_cfg.general.verbose)
+
+        t0 = time.monotonic()
         self._create_environments()
+        _init_log.debug("_create_environments done in %.1fs", time.monotonic() - t0)
+
+        t0 = time.monotonic()
         self._setup_callbacks(self.environment)
+        _init_log.debug("_setup_callbacks done in %.1fs", time.monotonic() - t0)
+
+        t0 = time.monotonic()
         self._complete_model_initialization(self.environment.train_env)
+        _init_log.debug("_complete_model_initialization done in %.1fs", time.monotonic() - t0)
 
     def _configure_verbose(self, verbose) -> None:
         """Apply log levels for rosnav_rl namespaces and this trainer."""
@@ -168,6 +183,7 @@ class StableBaselines3Trainer(ArenaTrainer):
             wrappers=[partial(TimeSyncWrapper, control_hz=self.config.arena_cfg.general.control_hz)],
             observations_config=self.config.agent_config.observations_config,
         )
+        t0 = time.monotonic()
         env = sb3_wrap_env(
             node=self._supervisor_node,
             env_fncs=train_env_fncs,
@@ -175,7 +191,11 @@ class StableBaselines3Trainer(ArenaTrainer):
             monitoring_cfg=self.config.arena_cfg.monitoring,
             profiling_cfg=self.config.arena_cfg.profiling,
         )
+        _init_log.debug("sb3_wrap_env done in %.1fs", time.monotonic() - t0)
+
+        t0 = time.monotonic()
         env = self.agent.model.setup_environment(env)
+        _init_log.debug("agent.model.setup_environment done in %.1fs", time.monotonic() - t0)
         self.environment = SB3Environment(train_env=env, eval_env=env)
 
     def _setup_callbacks(self, environment: SB3Environment) -> None:

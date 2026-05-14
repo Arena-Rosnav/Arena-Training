@@ -16,6 +16,12 @@ def generate_launch_description():
         description='Path to training config YAML.',
     )
 
+    LaunchArgument(
+        name='mobile',
+        default_value='rosnav_rl',
+        description='Mobile adapter for training envs. Override only if train_agent will not be driving cmd_vel.',
+    )
+
     arena_launch = IncludeLaunchDescriptionForward(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([

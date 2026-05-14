@@ -1,3 +1,4 @@
+import logging
 import multiprocessing as mp
 import time
 import warnings
@@ -9,21 +10,30 @@ from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper
 from stable_baselines3.common.vec_env.patch_gym import _patch_env
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 
+_init_log = logging.getLogger("arena_training.init")
+
 
 def _worker(
     remote: mp.connection.Connection,
     parent_remote: mp.connection.Connection,
     env_fn_wrapper: CloudpickleWrapper,
+    worker_idx: int = -1,
 ) -> None:
     # Import here to avoid a circular import
     from stable_baselines3.common.env_util import is_wrapped
+    import os
     import rclpy
+
+    # Worker inherits parent stdio but not logging config, so configure here.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    _tag = f"[train_worker{worker_idx} pid={os.getpid()}]"
+    _init_log.info(f"{_tag} started")
 
     parent_remote.close()
 
-    # Each worker process needs its own ROS2 context.
-    # With forkserver/spawn the context is not yet initialized; with fork it
-    # would be stale, so we shut it down first and reinitialize cleanly.
     try:
         if rclpy.ok():
             rclpy.shutdown()
@@ -32,6 +42,7 @@ def _worker(
     rclpy.init()
 
     env = _patch_env(env_fn_wrapper.var())
+    _init_log.info(f"{_tag} env constructed, awaiting commands")
     reset_info: Optional[Dict[str, Any]] = {}
     while True:
         try:
@@ -68,7 +79,12 @@ def _worker(
             elif cmd == "is_wrapped":
                 remote.send(is_wrapped(env, data))
             elif cmd == "init":
-                remote.send(env._initialize_environment())
+                t0 = time.monotonic()
+                result = env._initialize_environment()
+                _init_log.info(
+                    f"{_tag} init done in {time.monotonic() - t0:.1f}s"
+                )
+                remote.send(result)
             else:
                 raise NotImplementedError(f"`{cmd}` is not implemented in the worker")
         except EOFError:
@@ -93,20 +109,25 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
 
         self.remotes, self.work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
         self.processes = []
-        for work_remote, remote, env_fn in zip(
+        for idx, (work_remote, remote, env_fn) in enumerate(zip(
             self.work_remotes, self.remotes, env_fns
-        ):
-            args = (work_remote, remote, CloudpickleWrapper(env_fn))
-            # daemon=True: if the main process crashes, we should not cause things to hang
+        )):
+            args = (work_remote, remote, CloudpickleWrapper(env_fn), idx)
             # pytype: disable=attribute-error
+            t_spawn = time.monotonic()
             process = ctx.Process(target=_worker, args=args, daemon=True)  # type: ignore[attr-defined]
             # pytype: enable=attribute-error
             process.start()
             self.processes.append(process)
             work_remote.close()
 
+            t_init = time.monotonic()
             remote.send(("init", None))
-            success = remote.recv()
+            remote.recv()
+            _init_log.info(
+                "worker %d ready (spawn=%.1fs, init=%.1fs)",
+                idx, t_init - t_spawn, time.monotonic() - t_init,
+            )
 
             time.sleep(1)
 

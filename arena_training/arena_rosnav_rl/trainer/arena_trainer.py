@@ -1,3 +1,5 @@
+import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +20,8 @@ from ..utils.training import (
 from ..utils import paths as Paths
 from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
+
+_init_log = logging.getLogger("arena_training.init")
 
 @dataclass
 class TrainingArguments:
@@ -124,16 +128,18 @@ class ArenaTrainer(ABC):
             None
         """
         setup_steps = [
-            self._populate_agent_spec,
-            self._setup_agent_parameters,
-            lambda: setup_paths_dictionary(self, self.is_debug_mode),
-            lambda: self._write_config(),
-            self._setup_agent,
-            self._setup_environment,
+            ("_populate_agent_spec", self._populate_agent_spec),
+            ("_setup_agent_parameters", self._setup_agent_parameters),
+            ("setup_paths_dictionary", lambda: setup_paths_dictionary(self, self.is_debug_mode)),
+            ("_write_config", lambda: self._write_config()),
+            ("_setup_agent", self._setup_agent),
+            ("_setup_environment", self._setup_environment),
         ]
 
-        for step in setup_steps:
+        for name, step in setup_steps:
+            t0 = time.monotonic()
             step()
+            _init_log.debug("trainer step %s done in %.1fs", name, time.monotonic() - t0)
 
     @bind_hooks(
         before_stage=TrainingHookStages.BEFORE_TRAINING,

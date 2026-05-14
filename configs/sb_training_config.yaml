@@ -99,7 +99,7 @@ arena_cfg:
     max_num_moves_per_eps: 600  # Maximum number of steps per episode before termination
     n_envs: 2  # Number of parallel training environments
     n_timesteps: 4000000  # Total number of timesteps to train for
-    no_gpu: true  # Set to true to force CPU training even if GPU is available
+    no_gpu: false  # Set to true to force CPU training even if GPU is available
     safety_distance: 1.0  # Minimum distance to maintain from obstacles for safety
     show_progress_bar: false  # Display progress bar during training
     control_hz: 10.0  # Control frequency in Hz (wall-clock rate ≈ sim_realtime_factor × control_hz)
