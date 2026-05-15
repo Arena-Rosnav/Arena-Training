@@ -135,6 +135,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_srv = None
         self._cmd_vel_pub = None
         self._episode_state_sub = None
+        self._tg_get_params_client = None
         self._latest_episode: Optional[EpisodeRecord] = None
         self._episode_event = threading.Event()
         self._fleet_sub = None
@@ -290,13 +291,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        # Client to read goal_tolerance_radius from the co-located task_generator.
-        # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
-        # with the curriculum's goal_tolerance_radius.
-        tg_node_name = (self.env_ns / "task_generator_node").to_string()
+        # env_ns is the task_generator node's FQN, ROS parameter services
+        # are advertised relative to the node, not under a child segment.
         self._tg_get_params_client = self.node.create_client(
             GetParametersSrv,
-            f"{tg_node_name}/get_parameters",
+            f"{self.env_ns.to_string()}/get_parameters",
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
@@ -695,13 +694,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         If no curriculum is active (or the param hasn't been set), the value from
         arena_cfg.general.goal_radius (baked into agent_parameters at startup) is kept.
         """
-        client = getattr(self, "_tg_get_params_client", None)
-        if client is None or not client.service_is_ready():
+        if self._tg_get_params_client is None or not self._tg_get_params_client.service_is_ready():
             return
         try:
             req = GetParametersSrv.Request()
             req.names = ["goal_tolerance_radius"]
-            future = client.call_async(req)
+            future = self._tg_get_params_client.call_async(req)
             deadline = time.monotonic() + 0.5
             while not future.done() and time.monotonic() < deadline:
                 time.sleep(0.01)

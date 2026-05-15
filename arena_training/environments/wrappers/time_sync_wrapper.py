@@ -37,6 +37,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         # Rate object for efficient sim-clock-aware sleeping (signals via threading.Event
         # set directly by the /clock callback, bypassing spin_once queue starvation).
         self._rate = env.node.create_rate(control_hz, clock=self.clock)
+        self._last_step_exit_wall = time.monotonic()
 
     def _initialize_environment(self):
         """
@@ -73,7 +74,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         elif elapsed_nanosec > self.control_interval_nanosec + self.warning_slop_nanosec:
             desired_hz = 1e9 / self.control_interval_nanosec
             actual_hz = 1e9 / elapsed_nanosec
-            wall_gap_ms = (_t_entry_wall - getattr(self, "_last_step_exit_wall", _t_entry_wall)) * 1000
+            wall_gap_ms = (_t_entry_wall - self._last_step_exit_wall) * 1000
             # throttle_duration_sec=5.0: rcutils suppresses DDS publish within window
             # (check happens before the rosout publish, so suppressed calls have zero DDS overhead)
             self.node.get_logger().warn(
