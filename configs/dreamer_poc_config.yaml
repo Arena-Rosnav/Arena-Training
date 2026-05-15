@@ -1,0 +1,351 @@
+# =============================================================================
+# DreamerV3 — Proof-of-Concept / Pipeline Validation Config
+# =============================================================================
+# Goal: Prove that the Arena–DreamerV3 pipeline trains successfully end-to-end.
+#
+# Design principles:
+#   • XS world model (dyn_deter=512) — half the size of the full template,
+#     trains ~2× faster while still having enough capacity for laser+goal nav.
+#   • MLP-only encoder/decoder: 72-beam 1D laser scan + 2D goal vector.
+#     Replaces the original 10×80×80 CNN (StackedLaserMapSpace) which caused
+#     reconstruction loss ~500 that swamped reward/cont gradients entirely.
+#     72 beams from 720 = every 10th beam = 3.75° angular resolution over 270°.
+#   • Minimal reward: goal reached + collision penalty + approach shaping only.
+#   • 4 parallel environments as requested.
+#   • bfloat16 AMP (precision=16) + torch.compile for GPU throughput.
+#   • 2 M env-steps target — sufficient to observe convergence on stage 0/1.
+#
+# Run with:
+#   arena train sim:=gazebo local_planner:=rosnav_rl \
+#         train_config:=dreamer_poc_config.yaml headless:=2
+# =============================================================================
+
+agent_config:
+  name: dreamer_poc
+  observations_config: observations/observations.yaml
+
+  framework:
+    name: dreamerv3
+
+    # -------------------------------------------------------------------------
+    # General
+    # -------------------------------------------------------------------------
+    general:
+      logdir: null            # set automatically by trainer
+      device: cuda:0
+      seed: 42
+      precision: 16           # bfloat16 AMP — ~1.5× faster, safe on Ampere/Ada
+      compile: true           # torch.compile — significant speedup after warmup
+      debug: false
+      deterministic_run: false
+      parallel: true
+      log_every: 5000         # log every 5 k env-steps (more frequent for POC)
+      video_pred_log: false
+      evaldir: null
+      traindir: null
+      offline_traindir: ''
+      offline_evaldir: ''
+
+    # -------------------------------------------------------------------------
+    # Environment (arena manages parallel envs; these are DreamerV3-side knobs)
+    # -------------------------------------------------------------------------
+    environment:
+      action_repeat: 1
+      grayscale: false
+      reset_every: 0
+      reward_EMA: true        # EMA reward normalisation — helps with reward scale
+
+    # -------------------------------------------------------------------------
+    # Model — XS size from DreamerV3 paper (Hafner et al. 2023)
+    # -------------------------------------------------------------------------
+    # Size comparison:
+    #   Template (S/M):  dyn_deter=1024, units=512, mlp_units=1024, cnn_depth=32
+    #   This POC (XS):   dyn_deter=512,  units=256, mlp_units=256,  cnn_depth=16
+    # XS is sufficient for laser+goal navigation; uses ~4× less memory/compute.
+    model:
+      # Core dense size used by all sub-networks (actor, critic, reward/cont heads)
+      units: 256
+      act: SiLU
+      norm: true
+
+      # World-model dynamics (RSSM)
+      # dyn_deter: GRU hidden size — main capacity knob; 512 suffices for nav.
+      # dyn_stoch+dyn_discrete: categorical latent (32×32=1024 bits) — keep default.
+      dyn_deter: 512
+      dyn_stoch: 32
+      dyn_discrete: 32
+      dyn_hidden: 256         # MLP projection into GRU; half of dyn_deter is fine
+      dyn_rec_depth: 1
+      dyn_mean_act: none
+      dyn_std_act: sigmoid2
+      dyn_min_std: 0.1
+      dyn_scale: 0.5
+
+      # KL / representation
+      kl_free: 1.0
+      rep_scale: 0.1
+      unimix_ratio: 0.01
+      weight_decay: 0.0
+      initial: learned
+
+      grad_heads:
+        - decoder
+        - reward
+        - cont
+
+      # -----------------------------------------------------------------------
+      # Encoder — processes observations into a latent embedding
+      # -----------------------------------------------------------------------
+      # All observations go through the MLP path (no CNN).
+      # ReducedLaserScanSpace: 72 floats (3.75°/beam, 270° FOV) — tiny vs the
+      #   former 10×80×80=64000 floats. Reconstruction loss drops from ~500 to ~1.
+      # DistAngleToSubgoalSpace: 2 floats [dist, angle].
+      # mlp_layers=4, mlp_units=512: deeper/wider to compensate for losing the
+      #   CNN's inductive bias; 72 inputs need more capacity than 2 inputs.
+      encoder:
+        cnn_keys: '^$'
+        mlp_keys: ReducedLaserScanSpace|DistAngleToGoalSpace
+        act: SiLU
+        norm: true
+        cnn_depth: 32
+        kernel_size: 4
+        minres: 4
+        mlp_layers: 4
+        mlp_units: 512
+        symlog_inputs: true
+        is_channels_first: true
+
+      # -----------------------------------------------------------------------
+      # Decoder — reconstructs observations from latent state (world-model loss)
+      # Symmetric with encoder; must match the same keys.
+      # -----------------------------------------------------------------------
+      decoder:
+        cnn_keys: '^$'
+        mlp_keys: ReducedLaserScanSpace|DistAngleToGoalSpace
+        act: SiLU
+        norm: true
+        cnn_depth: 32
+        kernel_size: 4
+        minres: 4
+        mlp_layers: 4
+        mlp_units: 512
+        cnn_sigmoid: false
+        image_dist: mse
+        vector_dist: symlog_mse
+        outscale: 1.0
+        is_channels_first: true
+
+      # -----------------------------------------------------------------------
+      # Behavior (imagination-based policy learning)
+      # -----------------------------------------------------------------------
+      # discount=0.995 → effective horizon ≈ 200 steps ≈ 20 s at 10 Hz.
+      #   With max_num_moves_per_eps=350 this aligns well with episode length.
+      # imag_horizon=10: shorter imagination speeds up each training iteration;
+      #   adequate for the relatively short navigation episodes in stage 0/1.
+      behavior:
+        discount: 0.995
+        discount_lambda: 0.95
+        imag_horizon: 8       # Reduced from 15: fewer compounding world-model errors, tighter actor gradients
+        imag_gradient: dynamics
+        imag_gradient_mix: 0.0
+        eval_state_mean: false
+
+      # -----------------------------------------------------------------------
+      # Actor network
+      # -----------------------------------------------------------------------
+      actor:
+        dist: normal
+        layers: 2
+        units: 256
+        lr: 3.0e-05
+        entropy: 3.0e-04     # entropy bonus keeps exploration alive early
+        grad_clip: 100.0
+        outscale: 1.0
+        std: learned
+        min_std: 0.1
+        max_std: 1.0
+        temp: 0.1
+        unimix_ratio: 0.01
+        eps: 1.0e-05
+
+      # -----------------------------------------------------------------------
+      # Critic network
+      # -----------------------------------------------------------------------
+      critic:
+        dist: symlog_disc
+        layers: 2
+        units: 256
+        lr: 3.0e-05
+        grad_clip: 100.0
+        outscale: 0.0
+        eps: 1.0e-05
+        slow_target: true
+        slow_target_update: 1
+        slow_target_fraction: 0.02
+
+      # Reward head
+      # loss_scale=2.0: mild upweight; MLP reconstruction loss is now ~1-2,
+      # so reward_loss (~0.4) is already comparable — no heavy boost needed.
+      reward_head:
+        dist: symlog_disc
+        layers: 2
+        outscale: 0.0
+        loss_scale: 2.0
+
+      # Continuation head (predicts episode termination)
+      # loss_scale=30: upweighted strongly for class imbalance. With 200-step episodes
+      # and batch_length=64, terminal events are rare (~0.5% of batch steps).
+      # 30× amplification keeps cont_loss from collapsing to zero.
+      # Monitor model_loss — if it spikes, back off to 15.
+      cont_head:
+        layers: 2
+        outscale: 1.0
+        loss_scale: 30
+
+      # Exploration — disabled for POC (pure extrinsic reward)
+      exploration:
+        extr_scale: 1.0      # use task reward only
+        intr_scale: 0.0      # no intrinsic curiosity bonus
+        behavior: greedy
+        until: 0
+
+    # -------------------------------------------------------------------------
+    # Training
+    # -------------------------------------------------------------------------
+    # train_ratio=16: for each env step the world model trains 16 gradient
+    #   steps — this is DreamerV3's key advantage (high sample efficiency).
+    #   Keep at 16; reducing it would slow learning without speeding up GPU.
+    # batch_size=16, batch_length=64: standard DreamerV3 defaults; work well
+    #   for navigation tasks.
+    # prefill_steps=500: random rollout before training starts; 500 × 4 envs =
+    #   2000 transitions in buffer — enough for ~31 initial batches.
+    # dataset_size=100: 100 k-step replay buffer; sufficient for POC where we
+    #   run only 2 M steps total.
+    training:
+      steps: 2.0e+6          # 2 M env-steps → ~139 k gradient steps (train_ratio=16 × 4 envs)
+      batch_size: 16
+      batch_length: 64
+      train_ratio: 16
+      dataset_size: 100      # replay buffer capacity (× 1000 steps = 100 k steps)
+      prefill_steps: 500
+      pretrain_steps: 100
+      model_lr: 0.0001
+      opt: adam
+      opt_eps: 1.0e-08
+      grad_clip: 1000
+      eval_episode_num: 5    # fewer eval episodes for speed
+      eval_every: 5000       # evaluate every 5 k env-steps
+
+  # ---------------------------------------------------------------------------
+  # Reward — minimal set for navigation proof-of-concept
+  # ---------------------------------------------------------------------------
+  # Three components only:
+  #   goal_reached  — large sparse reward; provides the terminal training signal
+  #   collision     — large sparse penalty; prevents dangerous behaviour
+  #   approach_goal — dense progress shaping; keeps gradients informative
+  #                   between sparse events (avoids reward desert early in training)
+  reward:
+    reward_function_dict:
+      goal_reached:
+        reward: 15            # +15 on reaching goal; dominates all dense rewards
+
+      collision:
+        reward: -15           # −15 on collision; symmetric with goal_reached
+
+      approach_goal:
+        pos_factor: 0.3       # reward for closing distance to goal
+        neg_factor: 0.4       # slightly larger penalty for moving away
+        _goal_update_threshold: 0.25
+        _follow_subgoal: false  # FIXED: subgoal topic has no publisher; track main goal_pose instead
+        _on_safe_dist_violation: true
+
+    reward_unit_kwargs: null
+    verbose: false
+
+# -----------------------------------------------------------------------------
+# Arena configuration
+# -----------------------------------------------------------------------------
+arena_cfg:
+  general:
+    debug_mode: false
+    goal_radius: 0.4
+    max_num_moves_per_eps: 200   # Reduced from 350: shorter episodes → more frequent resets → higher
+                                   # terminal rate in batches → cont_head gets real training signal.
+    n_envs: 4                    # 4 parallel environments as requested
+    no_gpu: false
+    safety_distance: 0.3         # relaxed for POC (agent learns collision avoidance from reward)
+    control_hz: 10.0
+    verbose: 1
+
+  logging:
+    default_level: CRITICAL
+    overrides:
+      rosnav_rl.observations: CRITICAL
+      rosnav_rl.reward: CRITICAL
+      rosnav_rl.spaces: CRITICAL
+      rosnav_rl.model.dreamerv3.helper: INFO   # keep stage-transition banners
+    ros_level: CRITICAL
+    ros_overrides: {}
+
+  monitoring:
+    episode_logging:
+      last_n_episodes: 20
+      record_actions: true
+    eval_metrics: false
+    training_metrics: true
+    wandb:
+      project_name: Arena-RL
+      group: DreamerV3-POC
+      run_name: null
+      tags: null
+
+  task:
+    tm_modules: staged
+    tm_obstacles: random
+    tm_robots: random
+
+    staged:
+      starting_stage: 0
+      threshold_type: succ
+      upper_threshold: 0.95     # advance at 95% success (slightly lower → progress faster)
+      lower_threshold: 0.3
+      parameter_node_template: "/arena/env_{i}/task_generator_node"
+      timeout: 5.0
+      curriculum_definition:
+        # Stage 0: Empty map — validate the pipeline; robot should reach goal reliably
+        - task.random.static.n: [0, 0]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [0, 0]
+          task.random.static.models: []
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 3.0    # INCREASED from 1.0: ~9× larger goal area → random walk can stumble in
+
+        # Stage 1: Few static obstacles + first pedestrian
+        - task.random.static.n: [2, 4]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [1, 1]
+          task.random.static.models: [chair, table]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.5
+
+        # Stage 2: More static + 1-3 pedestrians
+        - task.random.static.n: [3, 5]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [1, 3]
+          task.random.static.models: [chair, table, shelf]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.4
+
+        # Stage 3: Dense environment — 3-5 pedestrians + full static clutter
+        - task.random.static.n: [4, 6]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [3, 5]
+          task.random.static.models: [chair, table, shelf]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.3
+
+  profiling: null

@@ -1,7 +1,7 @@
 import logging
 import multiprocessing as mp
-import time
 import warnings
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 import gymnasium as gym
@@ -88,6 +88,21 @@ def _worker(
             else:
                 raise NotImplementedError(f"`{cmd}` is not implemented in the worker")
         except EOFError:
+            break
+        except Exception as _e:
+            # Surface worker-side exceptions to stderr instead of dying
+            # silently; without this the parent sees EOFError with no clue.
+            import sys as _sys, traceback as _tb, os as _os
+            _sys.stderr.write(
+                f"[DelayedSubprocVecEnv._worker pid={_os.getpid()}] cmd={cmd!r} "
+                f"raised {_e!r}\n{_tb.format_exc()}"
+            )
+            _sys.stderr.flush()
+            # Try to inform parent, then exit so the parent's recv() returns.
+            try:
+                remote.send(("__worker_error__", repr(_e)))
+            except Exception:
+                pass
             break
 
 

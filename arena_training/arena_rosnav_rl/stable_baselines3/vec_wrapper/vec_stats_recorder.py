@@ -71,7 +71,11 @@ class VecStatsRecorder(VecEnvWrapper):
                 self.cum_rewards[idx] = 0.0
 
                 self.episode_lengths.append(infos[idx]["episode_length"])
-                self.done_reasons[infos[idx]["done_reason"].name] += 1
+                reason = infos[idx]["done_reason"]
+                reason_name = reason.name if hasattr(reason, "name") else str(reason)
+                if reason_name not in self.done_reasons:
+                    self.done_reasons[reason_name] = 0
+                self.done_reasons[reason_name] += 1
 
                 self.num_episodes += 1
 

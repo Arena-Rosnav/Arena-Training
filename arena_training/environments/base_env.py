@@ -12,6 +12,8 @@ import rclpy
 import yaml
 from geometry_msgs.msg import Twist
 
+from rcl_interfaces.srv import GetParameters as GetParametersSrv
+
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
 )
@@ -63,10 +65,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     metadata = {"render_modes": ["human"]}
 
     _TIMEOUT_PARAM_DEFAULTS = {
-        "reset_task_timeout": -1.0,
-        "service_wait_timeout": -1.0,
-        "episode_wait_timeout": -1.0,
-        "fleet_wait_timeout": -1.0,
+        "reset_task_timeout": 30.0,
+        "service_wait_timeout": 30.0,
+        "episode_wait_timeout": 60.0,
+        "fleet_wait_timeout": 60.0,
     }
 
     def __init__(
@@ -285,6 +287,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 depth=1,
                 durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
             ),
+            callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
+        )
+
+        # Client to read goal_tolerance_radius from the co-located task_generator.
+        # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
+        # with the curriculum's goal_tolerance_radius.
+        tg_node_name = (self.env_ns / "task_generator_node").to_string()
+        self._tg_get_params_client = self.node.create_client(
+            GetParametersSrv,
+            f"{tg_node_name}/get_parameters",
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
@@ -674,8 +686,42 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         pass
 
     def _after_task_reset(self):
-        """Hook for executing actions after the task is reset."""
-        pass
+        """Sync agent_parameters.goal_radius from task_generator's goal_tolerance_radius.
+
+        When a curriculum is active the curriculum module sends SetParameters to the
+        task_generator node, updating ``goal_tolerance_radius`` there. This hook reads
+        that value back after each episode reset so the reward function's goal-reached
+        check stays consistent with the nav-planner's goal tolerance.
+        If no curriculum is active (or the param hasn't been set), the value from
+        arena_cfg.general.goal_radius (baked into agent_parameters at startup) is kept.
+        """
+        client = getattr(self, "_tg_get_params_client", None)
+        if client is None or not client.service_is_ready():
+            return
+        try:
+            req = GetParametersSrv.Request()
+            req.names = ["goal_tolerance_radius"]
+            future = client.call_async(req)
+            deadline = time.monotonic() + 0.5
+            while not future.done() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if not future.done():
+                return
+            values = future.result().values
+            # ParameterType.PARAMETER_NOT_SET == 0; ignore unset params.
+            if not values or values[0].type == 0:
+                return
+            gtr = float(values[0].double_value)
+            if abs(gtr - self.__agent_parameters.goal_radius) > 1e-9:
+                self.__agent_parameters = self.__agent_parameters.model_copy(
+                    update={"goal_radius": gtr}
+                )
+                self.node.get_logger().info(
+                    f"[{self.env_ns.to_string()}] goal_radius synced from "
+                    f"task_generator goal_tolerance_radius: {gtr:.3f}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.node.get_logger().debug(f"goal_radius sync skipped: {exc}")
 
     def _on_episode_state(self, msg: EpisodeRecord) -> None:
         self._latest_episode = msg

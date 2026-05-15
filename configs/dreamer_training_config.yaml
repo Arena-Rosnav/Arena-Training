@@ -2,7 +2,7 @@
 # Use this template as a starting point for DreamerV3-based RL navigation
 
 agent_config:
-  name: dreamerv3-3  # Name of your agent - will be used for identifying model files
+  name: dreamerv3  # Name of your agent - will be used for identifying model files
   # Action space type, velocity ranges, and robot radius are derived
   # automatically from the robot description at training time.
   #
@@ -71,7 +71,8 @@ agent_config:
       encoder:
         act: SiLU  # Activation function (Sigmoid Linear Unit) - smooth alternative to ReLU
         cnn_depth: 32  # Depth of convolutional networks for processing image-like inputs
-        cnn_keys: PedestrianSocialStateSpace|PedestrianTypeSpace|PedestrianVelXSpace|PedestrianVelYSpace|StackedLaserMapSpace  # Observation keys to process with CNNs
+        #cnn_keys: PedestrianSocialStateSpace|PedestrianTypeSpace|PedestrianVelXSpace|PedestrianVelYSpace|StackedLaserMapSpace  # Observation keys to process with CNNs
+        cnn_keys: StackedLaserMapSpace  # Observation keys to process with CNNs
         is_channels_first: true  # Whether input tensor format is channels-first (NCHW) vs channels-last (NHWC)
         kernel_size: 4  # Size of convolutional kernels
         minres: 5  # Minimum resolution for CNN processing
@@ -85,7 +86,7 @@ agent_config:
       decoder:
         act: SiLU  # Activation function for decoder networks
         cnn_depth: 32  # Depth of convolutional networks in decoder
-        cnn_keys: PedestrianSocialStateSpace|PedestrianTypeSpace|PedestrianVelXSpace|PedestrianVelYSpace|StackedLaserMapSpace  # Keys to reconstruct with CNNs
+        cnn_keys: StackedLaserMapSpace  # Keys to reconstruct with CNNs
         cnn_sigmoid: false  # Whether to apply sigmoid to CNN outputs
         image_dist: mse  # Distribution for image reconstruction loss (mean squared error)
         is_channels_first: true  # Channels-first format for image-like data
@@ -250,8 +251,8 @@ arena_cfg:
   general:
     debug_mode: false  # Enable debugging features
     goal_radius: 0.4  # Radius within which goal is considered reached
-    max_num_moves_per_eps: 300  # Maximum steps per episode
-    n_envs: 2  # Number of parallel environments (should match agent settings)
+    max_num_moves_per_eps: 1200  # Maximum steps per episode
+    n_envs: 4  # Number of parallel environments (should match agent settings)
     no_gpu: false  # Force CPU even if GPU is available
     safety_distance: 1.0  # Minimum safety distance from obstacles
     control_hz: 10.0  # Step frequency cap in Hz (TimeSyncWrapper)
@@ -289,10 +290,10 @@ arena_cfg:
     staged:
       starting_stage: 0
       threshold_type: succ  # Metric to use: "succ" (success rate) or "rew" (reward)
-      upper_threshold: 0.9  # Performance threshold to advance to next stage
+      upper_threshold: 0.95  # Performance threshold to advance to next stage
       lower_threshold: 0.3  # Performance threshold to stay at current stage
 
-      parameter_node_template: "/task_generator_node/env{i}"  # Template for task generator node name
+      parameter_node_template: "/arena/env_{i}/task_generator_node"  # Template for task generator node name
       timeout: 5.0  # Timeout for ROS2 parameter service calls (seconds)
       curriculum_definition:
         # Stage 1: No obstacles (safe start)

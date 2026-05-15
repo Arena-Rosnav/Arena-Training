@@ -34,6 +34,9 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         # Initialized to current time, so the first step call will also adhere to the interval logic.
         self.last_step_initiation_time: Time = self.clock.now()
         self._skip_frequency_check = True  # Don't warn on the very first step
+        # Rate object for efficient sim-clock-aware sleeping (signals via threading.Event
+        # set directly by the /clock callback, bypassing spin_once queue starvation).
+        self._rate = env.node.create_rate(control_hz, clock=self.clock)
 
     def _initialize_environment(self):
         """
@@ -58,6 +61,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         If called too frequently, this method will block (while spinning the node)
         until the control interval has passed since the last step initiation.
         """
+        _t_entry_wall = time.monotonic()
         current_time = self._now()
         elapsed_nanosec = (current_time - self.last_step_initiation_time).nanoseconds
 
@@ -69,27 +73,28 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         elif elapsed_nanosec > self.control_interval_nanosec + self.warning_slop_nanosec:
             desired_hz = 1e9 / self.control_interval_nanosec
             actual_hz = 1e9 / elapsed_nanosec
+            wall_gap_ms = (_t_entry_wall - getattr(self, "_last_step_exit_wall", _t_entry_wall)) * 1000
+            # throttle_duration_sec=5.0: rcutils suppresses DDS publish within window
+            # (check happens before the rosout publish, so suppressed calls have zero DDS overhead)
             self.node.get_logger().warn(
                 f"Control frequency missed! "
-                f"Desired: {desired_hz:.2f}Hz, Actual: {actual_hz:.2f}Hz"
+                f"Desired: {desired_hz:.2f}Hz, Actual: {actual_hz:.2f}Hz, wall_gap={wall_gap_ms:.0f}ms",
+                throttle_duration_sec=5.0,
             )
 
         # Wait if the time elapsed since the last step initiation is less than the control interval.
-        # The loop continues as long as the duration since the last step is less than our target interval.
-        # Time differences result in rclpy.duration.Duration, which has a nanoseconds attribute.
-        while (
-            current_time - self.last_step_initiation_time
-        ).nanoseconds < self.control_interval_nanosec:
-            # Sleep for a very short duration.
-            # The SupervisorNode handles spinning in a background thread.
-            time.sleep(0.0001)  # Sleep for 0.1ms
-            current_time = self._now()
+        # Use Rate.sleep() which signals via a threading.Event set directly by the /clock callback,
+        # bypassing spin_once queue starvation entirely.  This is the canonical ROS2 approach.
+        if elapsed_nanosec < self.control_interval_nanosec:
+            self._rate.sleep()  # blocks until next period boundary per sim clock
 
         # Update the initiation time for the current step (which is now allowed to proceed)
         # It's important to take a fresh timestamp here, after the wait loop.
         self.last_step_initiation_time = self._now()
 
-        return self.env.step(action)
+        _result = self.env.step(action)
+        self._last_step_exit_wall = time.monotonic()
+        return _result
 
     def reset(self, **kwargs):
         """

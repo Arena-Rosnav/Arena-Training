@@ -17,6 +17,9 @@ class SupervisorNode(Node):
         self.get_logger().info(f"{node_name} has been started.")
         self._shutdown_event = threading.Event()
 
+        # SingleThreadedExecutor: no pool threads, no GIL competition from
+        # background executor threads.  spin_once() releases the GIL during
+        # rcl_wait so the worker's main thread can run Python code concurrently.
         self._executor = SingleThreadedExecutor()
         self._executor.add_node(self)
         self._spin_thread = threading.Thread(target=self._spin_loop)
@@ -41,9 +44,32 @@ class SupervisorNode(Node):
             self.get_logger().info("SupervisorNode spinning stopped.")
 
     def _spin_loop(self):
-        """Continuously spins the ROS2 node in a background thread."""
+        """Continuously spins the ROS2 node in a background thread with SingleThreadedExecutor."""
+        import traceback as _tb
         while not self._shutdown_event.is_set():
-            self._executor.spin_once(timeout_sec=0.01)
+            try:
+                # Use the executor to handle all callback groups
+                self._executor.spin_once(timeout_sec=0.001)
+            except Exception as e:
+                # Never let the spin thread die silently: dying makes every
+                # async service call wait forever on its completion event.
+                try:
+                    self.get_logger().error(
+                        f"[SupervisorNode._spin_loop] exception: {e!r}\n{_tb.format_exc()}"
+                    )
+                except Exception:
+                    import sys as _sys
+                    print(
+                        f"[SupervisorNode._spin_loop] exception: {e!r}\n{_tb.format_exc()}",
+                        file=_sys.stderr, flush=True,
+                    )
+                # If the rclpy context died, exit cleanly instead of spinning hot.
+                try:
+                    import rclpy as _rclpy
+                    if not _rclpy.ok():
+                        break
+                except Exception:
+                    break
 
     def destroy_node(self):
         self.stop_spinning()
