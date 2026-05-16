@@ -1,0 +1,191 @@
+import logging
+import multiprocessing as mp
+import warnings
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+import gymnasium as gym
+from gymnasium import spaces
+from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper
+from stable_baselines3.common.vec_env.patch_gym import _patch_env
+from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
+
+_init_log = logging.getLogger("arena_training.init")
+
+
+def _worker(
+    remote: mp.connection.Connection,
+    parent_remote: mp.connection.Connection,
+    env_fn_wrapper: CloudpickleWrapper,
+    worker_idx: int = -1,
+) -> None:
+    # Import here to avoid a circular import
+    from stable_baselines3.common.env_util import is_wrapped
+    import os
+    import rclpy
+
+    # Worker inherits parent stdio but not logging config, so configure here.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    _tag = f"[train_worker{worker_idx} pid={os.getpid()}]"
+    _init_log.info(f"{_tag} started")
+
+    parent_remote.close()
+
+    try:
+        if rclpy.ok():
+            rclpy.shutdown()
+    except Exception:
+        pass
+    rclpy.init()
+
+    env = _patch_env(env_fn_wrapper.var())
+    _init_log.info(f"{_tag} env constructed, awaiting commands")
+    reset_info: Optional[Dict[str, Any]] = {}
+    while True:
+        try:
+            cmd, data = remote.recv()
+            if cmd == "step":
+                observation, reward, terminated, truncated, info = env.step(data)
+                # convert to SB3 VecEnv api
+                done = terminated or truncated
+                info["TimeLimit.truncated"] = truncated and not terminated
+                if done:
+                    # save final observation where user can get it, then reset
+                    info["terminal_observation"] = observation
+                    observation, reset_info = env.reset()
+                remote.send((observation, reward, done, info, reset_info))
+            elif cmd == "reset":
+                maybe_options = {"options": data[1]} if data[1] else {}
+                observation, reset_info = env.reset(seed=data[0], **maybe_options)
+                remote.send((observation, reset_info))
+            elif cmd == "render":
+                remote.send(env.render())
+            elif cmd == "close":
+                env.close()
+                remote.close()
+                break
+            elif cmd == "get_spaces":
+                remote.send((env.observation_space, env.action_space))
+            elif cmd == "env_method":
+                method = env.get_wrapper_attr(data[0])
+                remote.send(method(*data[1], **data[2]))
+            elif cmd == "get_attr":
+                remote.send(env.get_wrapper_attr(data))
+            elif cmd == "set_attr":
+                remote.send(setattr(env, data[0], data[1]))  # type: ignore[func-returns-value]
+            elif cmd == "is_wrapped":
+                remote.send(is_wrapped(env, data))
+            elif cmd == "init":
+                t0 = time.monotonic()
+                result = env._initialize_environment()
+                _init_log.info(
+                    f"{_tag} init done in {time.monotonic() - t0:.1f}s"
+                )
+                remote.send(result)
+            else:
+                raise NotImplementedError(f"`{cmd}` is not implemented in the worker")
+        except EOFError:
+            break
+        except Exception as _e:
+            # Surface worker-side exceptions to stderr instead of dying
+            # silently; without this the parent sees EOFError with no clue.
+            import sys as _sys, traceback as _tb, os as _os
+            _sys.stderr.write(
+                f"[DelayedSubprocVecEnv._worker pid={_os.getpid()}] cmd={cmd!r} "
+                f"raised {_e!r}\n{_tb.format_exc()}"
+            )
+            _sys.stderr.flush()
+            # Try to inform parent, then exit so the parent's recv() returns.
+            try:
+                remote.send(("__worker_error__", repr(_e)))
+            except Exception:
+                pass
+            break
+
+
+class DelayedSubprocVecEnv(SubprocVecEnv):
+    def __init__(
+        self, env_fns: List[Callable[[], gym.Env]], start_method: Optional[str] = None
+    ):
+        self.waiting = False
+        self.closed = False
+        n_envs = len(env_fns)
+
+        if start_method is None:
+            # Fork is not a thread safe method (see issue #217)
+            # but is more user friendly (does not require to wrap the code in
+            # a `if __name__ == "__main__":`)
+            forkserver_available = "forkserver" in mp.get_all_start_methods()
+            start_method = "forkserver" if forkserver_available else "spawn"
+        ctx = mp.get_context(start_method)
+
+        self.remotes, self.work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
+        self.processes = []
+        for idx, (work_remote, remote, env_fn) in enumerate(zip(
+            self.work_remotes, self.remotes, env_fns
+        )):
+            args = (work_remote, remote, CloudpickleWrapper(env_fn), idx)
+            # pytype: disable=attribute-error
+            t_spawn = time.monotonic()
+            process = ctx.Process(target=_worker, args=args, daemon=True)  # type: ignore[attr-defined]
+            # pytype: enable=attribute-error
+            process.start()
+            self.processes.append(process)
+            work_remote.close()
+
+            t_init = time.monotonic()
+            remote.send(("init", None))
+            remote.recv()
+            _init_log.info(
+                "worker %d ready (spawn=%.1fs, init=%.1fs)",
+                idx, t_init - t_spawn, time.monotonic() - t_init,
+            )
+
+            time.sleep(1)
+
+        self.remotes[0].send(("get_spaces", None))
+        observation_space, action_space = self.remotes[0].recv()
+
+        self.parent_init(len(env_fns), observation_space, action_space)
+
+    def parent_init(
+        self,
+        num_envs: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+    ):
+        self.num_envs = num_envs
+        self.observation_space = observation_space
+        self.action_space = action_space
+        # store info returned by the reset method
+        self.reset_infos: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
+        # seeds to be used in the next call to env.reset()
+        self._seeds: List[Optional[int]] = [None for _ in range(num_envs)]
+        # options to be used in the next call to env.reset()
+        self._options: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
+
+        try:
+            render_modes = self.get_attr("render_mode")
+        except AttributeError:
+            warnings.warn(
+                "The `render_mode` attribute is not defined in your environment. It will be set to None."
+            )
+            render_modes = [None for _ in range(num_envs)]
+
+        assert all(
+            render_mode == render_modes[0] for render_mode in render_modes
+        ), "render_mode mode should be the same for all environments"
+        self.render_mode = render_modes[0]
+
+        render_modes = []
+        if self.render_mode is not None:
+            if self.render_mode == "rgb_array":
+                # SB3 uses OpenCV for the "human" mode
+                render_modes = ["human", "rgb_array"]
+            else:
+                render_modes = [self.render_mode]
+
+        self.metadata = {"render_modes": render_modes}

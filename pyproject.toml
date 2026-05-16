@@ -1,0 +1,52 @@
+[tool.uv]
+package = true
+
+[project]
+name = "arena-training"
+version = "0.1.0"
+description = "Deep Reinforcement Learning training pipeline for Arena-Rosnav"
+authors = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
+maintainers = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
+requires-python = "==3.10.*"
+dependencies = [
+    # Core Python dependencies
+    "pyyaml>=6.0,<7.0",
+    # Deep Learning & RL
+    "torch>=2.0.0,<3.0.0",
+    "stable-baselines3>=2.1.0,<3.0.0",
+    "sb3-contrib>=2.1.0,<3.0.0",
+    "gymnasium>=1.0.0,<2.0.0",
+    # Training & Monitoring
+    "wandb>=0.13.9,<1.0.0",
+    # Scientific Computing
+    "scipy>=1.10.0,<2.0.0",
+    # Utilities
+    "pydantic>=2.10.6,<3.0.0",
+    "ruamel-yaml>=0.17,<1.0",
+    "pygments>=2.18.0,<3.0.0",
+    "rosnav-rl", # Include local dependency in dev too
+    "pyinstrument>=5.1.2",
+]
+
+# Fixed local dependency using [tool.uv.sources]
+[tool.uv.sources]
+rosnav-rl = { path = "./deps/rosnav_rl/rosnav_rl", editable = true }
+
+# Convert project.optional-dependencies to uv dependency-groups
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0,<8.0.0",
+]
+
+[build-system]
+requires = ["setuptools<80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = []
+select = ["E", "F"]
+mccabe = { max-complexity = 10 }
+per-file-ignores = {}
