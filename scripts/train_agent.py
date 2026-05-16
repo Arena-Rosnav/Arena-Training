@@ -82,10 +82,11 @@ async def _spawn_envs(
             resp = await cli.call_timeout(req)
             if resp is None:
                 raise RuntimeError(f"SpawnEnv {idx} timed out")
+            log_hint = f" (log: {resp.log_path})" if resp.log_path else ""
             if not resp.success:
-                raise RuntimeError(f"SpawnEnv {idx} failed: {resp.error_msg}")
+                raise RuntimeError(f"SpawnEnv {idx} failed: {resp.error_msg}{log_hint}")
             node.get_logger().info(
-                f"env {idx} spawned at {resp.ns} in {time.monotonic() - t_call:.1f}s"
+                f"env {idx} spawned at {resp.ns} in {time.monotonic() - t_call:.1f}s{log_hint}"
             )
             return idx, resp.ns
 
