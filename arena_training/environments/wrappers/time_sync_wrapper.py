@@ -40,17 +40,8 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         self._last_step_exit_wall = time.monotonic()
 
     def _initialize_environment(self):
-        """
-        Initializes the environment if it has an _initialize_environment method.
-        This is useful for environments that require some setup before use.
-        """
-        if hasattr(self.env, "_initialize_environment"):
-            return self.env._initialize_environment()
-        else:
-            self.node.get_logger().warn(
-                "The wrapped environment does not have an _initialize_environment method."
-            )
-            return None
+        """Delegates to the wrapped env's _initialize_environment."""
+        return self.env._initialize_environment()
 
     def _now(self) -> Time:
         """Returns the current ROS time as an rclpy.time.Time object."""
