@@ -4,6 +4,8 @@ import re
 from typing import List, TYPE_CHECKING
 
 import torch
+import logging
+
 
 from sb3_contrib import RecurrentPPO
 from stable_baselines3 import PPO
@@ -28,18 +30,22 @@ def setup_wandb(
     to_watch: List[torch.nn.Module] = [],
 ) -> None:
     """Set up Weights and Biases (wandb) for training tracking."""
-    wandb.login()
-    wandb.init(
-        name=run_name if run_name else config.arena_cfg.monitoring.wandb.run_name,
-        group=group if group else config.arena_cfg.monitoring.wandb.group,
-        project=config.arena_cfg.monitoring.wandb.project_name,
-        tags=config.arena_cfg.monitoring.wandb.tags,
-        entity=None,
-        sync_tensorboard=True,
-        monitor_gym=False,
-        save_code=False,
-        config=config.model_dump(),
-        id=agent_id,
-    )
-    for module in to_watch:
-        wandb.watch(module, log_graph=True)
+    logger = logging.getLogger(__name__)
+    try:
+        wandb.login()
+        wandb.init(
+            name=run_name if run_name else config.arena_cfg.monitoring.wandb.run_name,
+            group=group if group else config.arena_cfg.monitoring.wandb.group,
+            project=config.arena_cfg.monitoring.wandb.project_name,
+            tags=config.arena_cfg.monitoring.wandb.tags,
+            entity=None,
+            sync_tensorboard=True,
+            monitor_gym=False,
+            save_code=False,
+            config=config.model_dump(),
+            id=agent_id,
+        )
+        for module in to_watch:
+            wandb.watch(module, log_graph=True)
+    except Exception as e:
+        logger.warning(f"[W&B] Failed to initialize (no network?): {e}. Continuing without W&B.")

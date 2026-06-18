@@ -11,10 +11,10 @@ Usage (handled automatically by ``DreamerV3Trainer`` when the config contains a
     model.train(train_envs=..., eval_envs=..., after_eval_fn=curriculum.after_eval_hook)
 
 After every evaluation phase ``helper.train()`` calls
-``after_eval_fn(eval_return)`` with the mean episodic return measured during
-that evaluation.  ``DreamerV3Curriculum.after_eval_hook`` stores the metric and
-delegates to ``CurriculumBase.check_thresholds_and_update()`` which handles
-stage advance / retreat logic as defined in the base class.
+``after_eval_fn(metrics)`` with a dict containing ``eval_return`` and
+``eval_success_rate``.  ``DreamerV3Curriculum.after_eval_hook`` picks the
+right value based on ``threshold_type`` and delegates to
+``CurriculumBase.check_thresholds_and_update()``.
 """
 
 import logging
@@ -27,6 +27,13 @@ from arena_training.arena_rosnav_rl.cfg.arena_cfg.task import StagedCfg
 
 _log = logging.getLogger(__name__)
 
+# Maps threshold_type config values to the key present in the metrics dict
+# passed by helper.train() → after_eval_fn.
+_METRIC_KEY: Dict[str, str] = {
+    "rew":  "eval_return",
+    "succ": "eval_success_rate",
+}
+
 
 class DreamerV3Curriculum(CurriculumBase):
     """Curriculum learning adapter for the DreamerV3 training pipeline.
@@ -36,13 +43,14 @@ class DreamerV3Curriculum(CurriculumBase):
 
     Implements the two abstract methods of ``CurriculumBase``:
 
-    * ``get_current_performance()``  — returns the most recent ``eval_return``
+    * ``get_current_performance()``  — returns the most recent metric value
+      (eval_return or eval_success_rate, depending on ``threshold_type``)
       logged after an evaluation phase, or *None* if no evaluation has run yet.
     * ``reset_performance_tracking()`` — resets the tracked metric to *-inf* so
       the next stage starts fresh.
 
     The bridge between the DreamerV3 training loop and this class is the thin
-    ``after_eval_hook(eval_return)`` method.  Pass it as::
+    ``after_eval_hook(metrics)`` method.  Pass it as::
 
         model.train(..., after_eval_fn=curriculum.after_eval_hook)
     """
@@ -68,7 +76,7 @@ class DreamerV3Curriculum(CurriculumBase):
         # Must be set before CurriculumBase.__init__ because the base
         # constructor calls _apply_curriculum() which may trigger
         # get_current_performance() indirectly through hooks.
-        self._last_eval_return: float = float("-inf")
+        self._last_performance: float = float("-inf")
         train_stages = [
             s.model_dump(by_alias=True, exclude_none=True)
             for s in staged_cfg.curriculum_definition
@@ -92,33 +100,35 @@ class DreamerV3Curriculum(CurriculumBase):
     # ── CurriculumBase abstract interface ──────────────────────────────────
 
     def get_current_performance(self) -> Optional[float]:
-        """Return the last recorded ``eval_return``, or *None* before first eval."""
-        if self._last_eval_return == float("-inf"):
+        """Return the last recorded performance metric, or *None* before first eval."""
+        if self._last_performance == float("-inf"):
             return None
-        return self._last_eval_return
+        return self._last_performance
 
     def reset_performance_tracking(self) -> None:
         """Reset metric so thresholds are evaluated fresh in the new stage."""
-        self._last_eval_return = float("-inf")
+        self._last_performance = float("-inf")
 
     # ── DreamerV3 hook ─────────────────────────────────────────────────────
 
-    def after_eval_hook(self, eval_return: float) -> None:
+    def after_eval_hook(self, metrics: Dict[str, float]) -> None:
         """Called by ``helper.train()`` after every evaluation phase.
 
-        Stores *eval_return* and immediately checks whether the curriculum
-        should advance or retreat.
+        Picks the right metric from *metrics* based on ``self.threshold_type``
+        and immediately checks whether the curriculum should advance or retreat.
 
         Args:
-            eval_return: Mean episodic return measured in the latest evaluation.
+            metrics: Dict with at least ``eval_return`` and ``eval_success_rate``.
         """
-        self._last_eval_return = eval_return
+        metric_key = _METRIC_KEY.get(self.threshold_type, "eval_return")
+        value = metrics.get(metric_key, float("-inf"))
+        self._last_performance = value
         _log.info(
-            "[Curriculum] stage=%d/%d  eval_return=%.3f  "
-            "(advance≥%.2f  retreat≤%.2f)",
+            "[Curriculum] stage=%d/%d  %s=%.3f  (advance≥%.2f  retreat≤%.2f)",
             self.curriculum_index,
             self.max_index - 1,
-            eval_return,
+            metric_key,
+            value,
             self.upper_threshold,
             self.lower_threshold,
         )

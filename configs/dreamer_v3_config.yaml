@@ -1,0 +1,336 @@
+# =============================================================================
+# DreamerV3 v3 — Cartesian Multi-Modal CNN + Social Navigation
+# =============================================================================
+# Goal: replace the StackedLaserMapSpace polar-statistics hack with a proper
+# robot-centric Cartesian laser obstacle map (LaserCartesianMapSpace), which
+# shares the same 2D coordinate frame as PedestrianVelXSpace/VelYSpace.
+#
+# Architecture rationale for LaserCartesianMapSpace vs StackedLaserMapSpace:
+#
+#   StackedLaserMapSpace (v2):
+#     - Output is (1, 80, 80), but it is NOT a 2D spatial image.  The map is
+#       (2×stack_size, 80) polar/temporal statistics tiled into a square.
+#       CNN 2D locality is only valid on the X-axis (angular bins); the Y-axis
+#       is time-slice rows — meaningless for spatial convolution.
+#     - Ring buffer duplicates temporal context already handled by RSSM's GRU.
+#     - MSE decoder reconstruction of 6400 non-zero tiled values → loss ≈ 141,
+#       which dominated 99 % of the total model gradient at step 100 k.
+#
+#   LaserCartesianMapSpace (v3):
+#     - Projects each beam endpoint (r, θ) → (r·cosθ, r·sinθ) in the robot
+#       frame into the same 80×80 Cartesian grid used by the pedestrian maps.
+#     - CNN 2D locality is physically meaningful in both axes (nearby cells
+#       are physically adjacent space).
+#     - All three CNN channels share the same coordinate frame; the ConvEncoder
+#       can learn that "ped moving toward a laser-occupied cell will decelerate."
+#     - Output is sparse (≈90 % zeros): MSE decoder loss ≈ 3–8 (vs 141).
+#     - No ring buffer: RSSM's h_t (dyn_deter=1024) provides temporal context.
+#
+# CNN channel layout:
+#   Ch 0  LaserCartesianMapSpace   (80,80)  static obstacle proximity [0,1]
+#   Ch 1  PedestrianVelXSpace      (80,80)  ped x-velocity in robot frame
+#   Ch 2  PedestrianVelYSpace      (80,80)  ped y-velocity in robot frame
+#
+# MLP input:
+#   DistAngleToGoalSpace   (2,)  — [dist, bearing] to current goal
+#
+# All other settings (model size "S", reward, curriculum) are unchanged from v2.
+# =============================================================================
+
+agent_config:
+  name: dreamer_v3
+  observations_config: observations/observations.yaml
+
+  framework:
+    name: dreamerv3
+
+    # -------------------------------------------------------------------------
+    # General
+    # -------------------------------------------------------------------------
+    general:
+      logdir: null
+      device: cuda:1
+      seed: 0
+      precision: 16          # bfloat16 AMP — fast on Ampere/Ada
+      debug: false
+      compile: true          # torch.compile enabled
+      deterministic_run: false
+      parallel: true
+      log_every: 10000.0
+      evaldir: null
+      traindir: null
+      offline_traindir: ''
+      offline_evaldir: ''
+      video_pred_log: false
+
+    # -------------------------------------------------------------------------
+    # Environment
+    # -------------------------------------------------------------------------
+    environment:
+      action_repeat: 1
+      grayscale: false
+      reset_every: 0
+      reward_EMA: false       # BUG 4 FIX: raw rewards; EMA squashed tiny signals.
+
+    # -------------------------------------------------------------------------
+    # Model — "S" size (Hafner et al. 2023)
+    # -------------------------------------------------------------------------
+    model:
+      units: 512
+      act: SiLU
+      norm: true
+
+      dyn_deter: 1024
+      dyn_stoch: 32
+      dyn_discrete: 32
+      dyn_hidden: 512
+      dyn_rec_depth: 1
+      dyn_mean_act: none
+      dyn_std_act: sigmoid2
+      dyn_min_std: 0.1
+      dyn_scale: 0.5
+
+      kl_free: 1.0
+      rep_scale: 0.1
+      unimix_ratio: 0.01
+      weight_decay: 0.0
+      initial: learned
+
+      grad_heads:
+        - decoder
+        - reward
+        - cont
+
+      # -----------------------------------------------------------------------
+      # Encoder
+      # CNN channels (all in the same robot-centric Cartesian frame, 80×80):
+      #   LaserCartesianMapSpace  — static obstacle proximity map [0,1]
+      #   PedestrianVelXSpace     — ped forward/backward velocity grid
+      #   PedestrianVelYSpace     — ped left/right velocity grid
+      # MLP input:
+      #   DistAngleToGoalSpace    — [dist, bearing] (2,)
+      # -----------------------------------------------------------------------
+      encoder:
+        cnn_keys: 'LaserCartesianMapSpace|PedestrianVelXSpace|PedestrianVelYSpace'
+        mlp_keys: 'DistAngleToGoalSpace'
+        act: SiLU
+        norm: true
+        cnn_depth: 32
+        kernel_size: 4
+        minres: 5             # 80→40→20→10→5; 4 stride-2 stages
+        mlp_layers: 3
+        mlp_units: 512
+        symlog_inputs: true
+        is_channels_first: true
+
+      # -----------------------------------------------------------------------
+      # Decoder — symmetric with encoder
+      # LaserCartesianMapSpace is sparse (≈90 % zeros) so MSE loss ≈ 3–8,
+      # a 20× reduction vs StackedLaserMapSpace (was ≈141).
+      # -----------------------------------------------------------------------
+      decoder:
+        cnn_keys: 'LaserCartesianMapSpace|PedestrianVelXSpace|PedestrianVelYSpace'
+        mlp_keys: 'DistAngleToGoalSpace'
+        act: SiLU
+        norm: true
+        cnn_depth: 32
+        kernel_size: 4
+        minres: 5
+        mlp_layers: 3
+        mlp_units: 512
+        cnn_sigmoid: false
+        image_dist: mse
+        vector_dist: symlog_mse
+        outscale: 1.0
+        is_channels_first: true
+
+      # -----------------------------------------------------------------------
+      # Behavior (imagination)
+      # -----------------------------------------------------------------------
+      behavior:
+        discount: 0.997
+        discount_lambda: 0.95
+        imag_horizon: 12
+        imag_gradient: dynamics
+        imag_gradient_mix: 0.0
+        eval_state_mean: false
+
+      # -----------------------------------------------------------------------
+      # Actor
+      # -----------------------------------------------------------------------
+      actor:
+        dist: normal
+        layers: 3
+        units: 512
+        lr: 3.0e-05
+        entropy: 5.0e-04
+        grad_clip: 100.0
+        outscale: 0.0         # near-zero initial policy → avoids step-1 collision loop
+        std: learned
+        min_std: 0.1
+        max_std: 1.0
+        temp: 0.1
+        unimix_ratio: 0.01
+        eps: 1.0e-05
+
+      # -----------------------------------------------------------------------
+      # Critic
+      # -----------------------------------------------------------------------
+      critic:
+        dist: symlog_disc
+        layers: 3
+        units: 512
+        lr: 3.0e-05
+        grad_clip: 100.0
+        outscale: 0.0
+        eps: 1.0e-05
+        slow_target: true
+        slow_target_update: 1
+        slow_target_fraction: 0.02
+
+      reward_head:
+        dist: symlog_disc
+        layers: 2
+        outscale: 0.0
+        loss_scale: 3.0
+
+      cont_head:
+        layers: 2
+        outscale: 1.0
+        loss_scale: 5
+
+      exploration:
+        extr_scale: 1.0
+        intr_scale: 0.0
+        behavior: greedy
+        until: 0
+
+    # -------------------------------------------------------------------------
+    # Training
+    # -------------------------------------------------------------------------
+    training:
+      steps: 5.0e+6
+      batch_size: 16
+      batch_length: 64
+      train_ratio: 16
+      dataset_size: 5000
+      prefill_steps: 1000
+      pretrain_steps: 200
+      model_lr: 8.0e-05
+      opt: adam
+      opt_eps: 1.0e-08
+      grad_clip: 1000
+      eval_episode_num: 30
+      eval_every: 5000
+
+  # ---------------------------------------------------------------------------
+  # Reward
+  # ---------------------------------------------------------------------------
+  reward:
+    reward_function_dict:
+      goal_reached:
+        reward: 15
+
+      collision:
+        reward: -15
+
+      approach_goal:
+        pos_factor: 0.3
+        neg_factor: 0.4
+        _goal_update_threshold: 0.25
+        _follow_subgoal: false
+        _on_safe_dist_violation: true
+
+      safe_distance:
+        reward: -0.5
+
+    reward_unit_kwargs: null
+    verbose: false
+
+# -----------------------------------------------------------------------------
+# Arena configuration
+# -----------------------------------------------------------------------------
+arena_cfg:
+  general:
+    debug_mode: false
+    goal_radius: 0.4
+    max_num_moves_per_eps: 300
+    n_envs: 4
+    no_gpu: false
+    safety_distance: 0.5
+    control_hz: 10.0
+    verbose: 1
+
+  logging:
+    default_level: CRITICAL
+    overrides:
+      rosnav_rl.observations: CRITICAL
+      rosnav_rl.reward: CRITICAL
+      rosnav_rl.spaces: CRITICAL
+      rosnav_rl.model.dreamerv3.helper: INFO
+    ros_level: CRITICAL
+    ros_overrides: {}
+
+  monitoring:
+    episode_logging:
+      last_n_episodes: 20
+      record_actions: true
+    eval_metrics: false
+    training_metrics: true
+    wandb:
+      enabled: true
+      project_name: Arena-RL
+      group: DreamerV3-S
+      run_name: null
+      tags: null
+
+  task:
+    tm_modules: staged
+    tm_obstacles: random
+    tm_robots: random
+
+    staged:
+      starting_stage: 1
+      threshold_type: succ
+      upper_threshold: 0.85
+      lower_threshold: 0.3
+      parameter_node_template: "/arena/env_{i}/task_generator_node"
+      timeout: 5.0
+      curriculum_definition:
+        # Stage 0: 3 pedestrians + open map
+        - task.random.static.n: [0, 0]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [3, 3]
+          task.random.static.models: []
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 1.0
+
+        # Stage 1: 7 pedestrians + light clutter
+        - task.random.static.n: [2, 2]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [7, 7]
+          task.random.static.models: [chair, table]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.75
+
+        # Stage 2: 11 pedestrians + moderate clutter (increased from 9)
+        - task.random.static.n: [3, 3]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [11, 11]
+          task.random.static.models: [chair, table, shelf]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.5
+
+        # Stage 3: 15 pedestrians + dense clutter — full difficulty (increased from 12)
+        - task.random.static.n: [4, 4]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [15, 15]
+          task.random.static.models: [chair, table, shelf]
+          task.random.interactive.models: []
+          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          goal_tolerance_radius: 0.4
+
+  profiling: null

@@ -155,11 +155,11 @@ def _make_dreamerv3_trainer(training_cfg, pruner):
             )
             pruner_hook = pruner.after_eval_hook if pruner is not None else None
 
-            def _combined(eval_return: float) -> None:
+            def _combined(metrics: dict) -> None:
                 if curriculum_hook is not None:
-                    curriculum_hook(eval_return)
+                    curriculum_hook(metrics)
                 if pruner_hook is not None:
-                    pruner_hook(eval_return)
+                    pruner_hook(metrics)
 
             after_eval = _combined if (curriculum_hook or pruner_hook) else None
 

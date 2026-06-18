@@ -1,4 +1,4 @@
-import logging
+import os
 import posixpath
 import threading
 import time
@@ -31,11 +31,10 @@ from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
     get_twist_from_action,
 )
+from rosnav_rl.observations import DONE_REASONS
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
 from rosnav_rl.utils.logging import flush_errors_decorator
-
-_init_log = logging.getLogger("arena_training.init")
 
 
 class ArenaBaseEnv(ABC, gymnasium.Env):
@@ -135,7 +134,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_srv = None
         self._cmd_vel_pub = None
         self._episode_state_sub = None
-        self._tg_get_params_client = None
         self._latest_episode: Optional[EpisodeRecord] = None
         self._episode_event = threading.Event()
         self._fleet_sub = None
@@ -151,7 +149,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_pending_timer: Optional[threading.Timer] = None
         self._pause_pending_token: object = None
         self._pause_lock = threading.Lock()
-        self._pause_lazy_threshold: float = 5.0
+        self._pause_lazy_threshold: float = 1.5
         self._initialized = False
 
         if not init_by_call:
@@ -162,11 +160,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if self._initialized:
             return  # Already initialized
 
-        tag = f"[env {self.env_ns.to_string()}]"
-
         if self.node is None:
             if not rclpy.ok():
-                rclpy.init()
+                rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
             self.node.set_parameters(
@@ -175,20 +171,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self.node.start_spinning()
 
         self._declare_timeout_params()
-        self._setup_fleet_subscription()
 
-        t0 = time.monotonic()
+        self._setup_fleet_subscription()
         self._resolve_robot()
-        _init_log.info("%s robot resolved ns=%s in %.1fs", tag, self.robot_ns, time.monotonic() - t0)
 
         if self.is_train_mode:
-            t0 = time.monotonic()
             self._setup_ros_services()
-            _init_log.info("%s ROS services up in %.1fs", tag, time.monotonic() - t0)
 
-        t0 = time.monotonic()
         self._setup_observation_manager()
-        _init_log.info("%s observation manager ready in %.1fs", tag, time.monotonic() - t0)
         self._initialized = True
 
     def _setup_fleet_subscription(self) -> None:
@@ -209,19 +199,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _resolve_robot(self) -> None:
         robots_topic = (self.env_ns / "state" / "robots").to_string()
-        timeout = self._timeout_param("fleet_wait_timeout")
-        deadline = float("inf") if timeout is None else time.monotonic() + timeout
-        heartbeat = 30.0
-        elapsed = 0.0
-        while not self._fleet_event.wait(timeout=heartbeat):
-            elapsed += heartbeat
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots."
-                )
-            _init_log.warning(
-                "[env %s] still waiting for fleet on '%s' (%.0fs)",
-                self.env_ns.to_string(), robots_topic, elapsed,
+        if not self._fleet_event.wait(timeout=self._timeout_param("fleet_wait_timeout")):
+            raise RuntimeError(
+                f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots."
             )
         if not self._latest_fleet.robots:
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
@@ -241,20 +221,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
         service_wait = self._timeout_param("service_wait_timeout")
-        deadline = float("inf") if service_wait is None else time.monotonic() + service_wait
-        heartbeat = 30.0
-        elapsed = 0.0
-        while not self._reset_task_srv.wait_for_service(timeout_sec=heartbeat):
-            elapsed += heartbeat
-            if time.monotonic() >= deadline:
-                self.node.get_logger().warn(
-                    f"Service '{task_srv_name}' not available. "
-                    f"Ensure the simulation and task_generator are running."
-                )
-                break
-            _init_log.warning(
-                "[env %s] still waiting for service '%s' (%.0fs)",
-                self.env_ns.to_string(), task_srv_name, elapsed,
+        if not self._reset_task_srv.wait_for_service(timeout_sec=service_wait):
+            self.node.get_logger().warn(
+                f"Service '{task_srv_name}' not available. "
+                f"Ensure the simulation and task_generator are running."
             )
 
         pause_srv_name = "/arena/sim_lifecycle/hold"
@@ -291,11 +261,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        # env_ns is the task_generator node's FQN, ROS parameter services
-        # are advertised relative to the node, not under a child segment.
+        # Client to read goal_tolerance_radius from the co-located task_generator.
+        # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
+        # with the curriculum's goal_tolerance_radius.
+        tg_node_name = (self.env_ns / "task_generator_node").to_string()
         self._tg_get_params_client = self.node.create_client(
             GetParametersSrv,
-            f"{self.env_ns.to_string()}/get_parameters",
+            f"{tg_node_name}/get_parameters",
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
@@ -328,6 +300,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         for ds in config.get("datasources", {}).values():
             if ds.get("type") == "RobotPoseTFGenerator":
                 ds.setdefault("params", {})["source_frame"] = self.robot_source_frame
+                # Use the namespace-qualified odom frame (guaranteed to exist via
+                # odom→base_link broadcast).  The map→odom static TF is an identity
+                # transform anyway, so robot_pose in odom == robot_pose in map.
+                robot_ns_prefix = posixpath.dirname(self.robot_source_frame)
+                ds.setdefault("params", {})["target_frame"] = posixpath.join(
+                    robot_ns_prefix, "odom"
+                )
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
@@ -401,19 +380,26 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # First step() means agent inference returned at least once: model is loaded.
         if not self._ready_event.is_set():
-            _init_log.info(
-                "[env %s] first step complete, entering rollout loop",
-                self.env_ns.to_string(),
-            )
             self._ready_event.set()
 
         # Publish velocity command directly — no nav2 controller dependency.
         self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
 
-        obs_dict = self.observation_collector.get_observations(
-            simulation_state_container=self.__agent_parameters,
-            is_first=self.__is_first_step,
-        )
+        try:
+            obs_dict = self.observation_collector.get_observations(
+                simulation_state_container=self.__agent_parameters,
+                is_first=self.__is_first_step,
+            )
+        except RuntimeError as exc:
+            # Sensor stall detected (e.g. GPU lidar stopped publishing).
+            # os._exit bypasses Python cleanup so THIS worker process dies
+            # immediately; the DreamerV3 multiprocessing pool restarts the
+            # worker, which creates a fresh ArenaBaseEnv and respawns the
+            # robot model in Gazebo — re-initialising the GPU lidar sensor.
+            self.node.get_logger().fatal(
+                f"[{self.env_ns.to_string()}] {exc}  Exiting worker to force respawn."
+            )
+            os._exit(1)
 
         reward, reward_info = self._reward_function.get_reward(
             obs_dict=obs_dict,
@@ -426,12 +412,31 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             curr_steps=self._steps_curr_episode,
             max_steps=self._max_steps_per_episode,
         )
+
         tg = self._latest_episode
         if tg is not None and tg.outcome_state not in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
             done = True
             info["done_reason"] = tg.outcome_info or f"task_generator:{tg.outcome_state}"
             info["is_success"] = int(tg.outcome_state == EpisodeRecord.SUCCESS)
             info["episode_length"] = self._steps_curr_episode
+
+        # Grace-period: suppress collision terminations on the first 3 steps of
+        # an episode.  Gazebo pedestrian repositioning after reset has a 1-2 step
+        # lag: the pedestrian that caused the previous collision may still occupy
+        # the robot's collision zone for steps 1-3 (≈300 ms at 10 Hz) before
+        # Gazebo fully processes the spawn/move command.  Data confirms 98% of
+        # steps 2-5 collisions immediately follow a collision episode.
+        # Use string comparison as a fallback because the task_generator may store
+        # the collision reason as str(DONE_REASONS.COLLISION) rather than the enum.
+        _grace_active = self._steps_curr_episode <= 3
+        _dr = info.get("done_reason")
+        _is_collision = _dr == DONE_REASONS.COLLISION or str(_dr) == str(DONE_REASONS.COLLISION)
+        if _grace_active and done and _is_collision:
+            done = False
+            info.clear()
+            for unit in self._reward_function.reward_units:
+                if hasattr(unit, "_collision_latched"):
+                    unit._collision_latched = False
         obs_dict["is_terminal"] = done
         self.__is_first_step = False
 
@@ -489,22 +494,17 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             if not self._first_reset_done:
                 # Managed mode: task_generator does not auto-spawn episode 1
                 # on activate (auto_reset=false), drive the first reset here.
-                ns_str = self.env_ns.to_string()
-                t_reset = time.monotonic()
                 self._first_reset_done = True
                 self._before_task_reset()
                 self.reset_task()
                 self._wait_for_new_episode(prev_id=0)
                 self._after_task_reset()
-                _init_log.info(
-                    "[env %s] first reset complete in %.1fs", ns_str, time.monotonic() - t_reset,
-                )
                 self._episode = (
                     self._latest_episode.episode_id if self._latest_episode is not None else 1
                 )
             elif (
                 self._latest_episode is not None
-                and self._latest_episode.outcome_state == EpisodeRecord.RUNNING
+                and self._latest_episode.outcome_state == EpisodeRecord.QUEUED
                 and steps_this_episode == 0
             ):
                 # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
@@ -694,12 +694,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         If no curriculum is active (or the param hasn't been set), the value from
         arena_cfg.general.goal_radius (baked into agent_parameters at startup) is kept.
         """
-        if self._tg_get_params_client is None or not self._tg_get_params_client.service_is_ready():
+        client = getattr(self, "_tg_get_params_client", None)
+        if client is None or not client.service_is_ready():
             return
         try:
             req = GetParametersSrv.Request()
             req.names = ["goal_tolerance_radius"]
-            future = self._tg_get_params_client.call_async(req)
+            future = client.call_async(req)
             deadline = time.monotonic() + 0.5
             while not future.done() and time.monotonic() < deadline:
                 time.sleep(0.01)
@@ -726,17 +727,17 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._episode_event.set()
 
     def _wait_for_new_episode(self, prev_id: int, timeout: Optional[float] = None) -> bool:
-        """Block until task_generator publishes a fresh RUNNING episode on state/episode."""
+        """Block until task_generator publishes a fresh QUEUED episode."""
         if timeout is None:
             timeout = self._timeout_param("episode_wait_timeout")
         deadline = float("inf") if timeout is None else time.monotonic() + timeout
         while time.monotonic() < deadline:
             tg = self._latest_episode
-            if (
-                tg is not None
-                and tg.episode_id > prev_id
-                and tg.outcome_state == EpisodeRecord.RUNNING
-            ):
+            # state/episode only carries RUNNING/SUCCESS/FAILED — QUEUED lives on
+            # state/queue, which we don't subscribe to. Any message with a fresh
+            # episode_id means the reset cycle has produced a new episode that's
+            # ready (or already running) for us.
+            if tg is not None and tg.episode_id > prev_id:
                 return True
             self._episode_event.clear()
             self._episode_event.wait(timeout=0.1)
