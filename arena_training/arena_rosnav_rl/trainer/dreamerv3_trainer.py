@@ -83,11 +83,28 @@ class DreamerV3Trainer(ArenaTrainer):
         and logs land next to the training_config.yaml.
         """
         from ..utils import paths as Paths
+        from rosnav_rl.cfg.action_spaces import OmnidirectionalActionSpace
 
         # Ensure logdir is set before DreamerV3Model.__init__ runs
         fw_cfg = self.config.agent_config.framework
         if fw_cfg.general.logdir is None and hasattr(self, "paths"):
             fw_cfg.general.logdir = str(self.paths[Paths.Agent].path)
+
+        # Propagate physical action ranges into social SE(2) config so that
+        # integrate_se2 can denormalise actions correctly during imagination.
+        social_cfg = fw_cfg.model.social
+        if social_cfg.use_se2_frame_canon:
+            action_space = self.config.agent_config.action_space
+            if action_space is not None:
+                is_omni = isinstance(action_space, OmnidirectionalActionSpace)
+                lr = action_space.linear_range_x if is_omni else action_space.linear_range
+                ar = action_space.angular_range
+                social_cfg.action_holonomic = is_omni
+                social_cfg.action_scale_linear = max(abs(lr[0]), abs(lr[1]))
+                social_cfg.action_scale_angular = max(abs(ar[0]), abs(ar[1]))
+                if is_omni:
+                    ly = action_space.linear_range_y
+                    social_cfg.action_scale_linear_y = max(abs(ly[0]), abs(ly[1]))
 
         self.agent = rosnav_rl.RL_Agent(self.config.agent_config)
         self.agent.initialize_model()

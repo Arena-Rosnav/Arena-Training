@@ -34,6 +34,7 @@ from arena_rclpy_mixins.Async import AsyncNode, ClientWrapper
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 from arena_training.arena_rosnav_rl.trainer import get_trainer
+from arena_training.arena_rosnav_rl.social_curriculum import SocialCurriculumCallback
 
 # Configure logging
 logging.basicConfig(
@@ -310,7 +311,20 @@ def main():
             "full init complete in %.1fs, entering train loop",
             time.monotonic() - overall_t0,
         )
-        trainer.train()
+        # Staged gated curriculum for Social-Dreamer (M6.1).
+        # Only active when social.curriculum.enabled=true in config.
+        _curriculum_cb = None
+        _social_cfg = getattr(getattr(config, "framework", None), "model", None)
+        _social_cfg = getattr(_social_cfg, "social", None) if _social_cfg else None
+        if _social_cfg and getattr(_social_cfg, "enabled", False):
+            _curriculum_cfg = getattr(_social_cfg, "curriculum", None)
+            if _curriculum_cfg and getattr(_curriculum_cfg, "enabled", False):
+                _curriculum_cb = SocialCurriculumCallback(
+                    config=_curriculum_cfg,
+                    agent=trainer._model if hasattr(trainer, "_model") else None,
+                    logger=logger,
+                )
+        trainer.train(after_eval_fn=_curriculum_cb)
 
         logger.info("Training completed successfully!")
         return 0
