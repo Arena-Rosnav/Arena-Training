@@ -9,12 +9,12 @@ arena_training/
 ├── agents/                        # Trained agent storage (training_config.yaml + best_model.zip)
 ├── arena_training/
 │   ├── arena_rosnav_rl/           # Arena-specific wiring (cfg, trainer, node, tools)
-│   └── environments/              # Gym environments (Gazebo, Flatland, …)
+│   └── environments/              # Gym environments (Gazebo)
 ├── deps/
 │   └── rosnav_rl/                 # Git submodule — rosnav_rl framework
 ├── scripts/
 │   ├── train_agent.py             # Main training entry point
-│   └── test_agent.py              # Pipeline smoke-test (no full training)
+│   └── tune_agent.py              # Optuna-based hyperparameter search over any TrainingCfg field
 ├── pyproject.toml                 # Python deps managed by uv
 ├── package.xml
 └── CMakeLists.txt
@@ -117,11 +117,11 @@ Trained agents (` training_config.yaml` + `best_model.zip`) are saved under `are
 
 ### Deployment
 
-Trained agents are loaded by the `rosnav_rl` action server at inference time. See the [rosnav_rl README](deps/rosnav_rl/README.md) for deployment instructions.
+Trained agents are loaded via `RL_Agent.from_agent_dir()`, shared by the inference node and the `rosnav_rl` action server. See the [rosnav_rl README](deps/rosnav_rl/README.md#deploy-a-pre-trained-agent) for both deployment paths.
 
-Quick test without a simulator:
+Quick test without a simulator (creates an agent with random weights, no training run needed):
 ```bash
-ros2 run arena_training test_agent
+python3 deps/rosnav_rl/rosnav_rl/scripts/create_test_agent.py --agent-name test_agent
 ```
 
 ## Supported RL Frameworks
