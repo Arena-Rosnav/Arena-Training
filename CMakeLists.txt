@@ -52,6 +52,7 @@ ament_python_install_package(${PROJECT_NAME} SCRIPTS_DESTINATION lib/${PROJECT_N
 # Install Python scripts
 install(PROGRAMS
   scripts/train_agent.py
+  scripts/tune_agent.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
