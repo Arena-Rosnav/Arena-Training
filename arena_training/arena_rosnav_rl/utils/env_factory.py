@@ -34,49 +34,9 @@ def load_vec_framestack(stack_size: int, env: VecEnv) -> VecEnv:
 def determine_env_class(simulator: Simulator) -> Union[gym.Env, gym.Wrapper]:
     """Determines the environment class based on the specified simulator."""
     return arena_envs.GazeboEnv
-    if simulator == Simulator.FLATLAND:
-        return arena_envs.FlatlandEnv
-    elif simulator == Simulator.GAZEBO:
-        return arena_envs.GazeboEnv
-    else:
-        raise RuntimeError(f"Simulator {simulator} is not supported.")
 
 
 def _init_env_fnc(
-    node: SupervisorNode,
-    env_class: gym.Env,
-    ns: Union[str, Namespace],
-    space_manager: rosnav_rl.BaseSpaceManager,
-    reward_function: rosnav_rl.RewardFunction,
-    simulation_state_container: rosnav_rl.AgentParameters,
-    max_steps_per_episode: int,
-    init_by_call: bool = False,
-    obs_unit_kwargs: dict = None,
-    seed: int = 0,
-    wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
-) -> callable:
-
-    def _init_env() -> Union[gym.Env, gym.Wrapper]:
-        env = env_class(
-            node=node,
-            ns=ns,
-            space_manager=space_manager,
-            reward_function=reward_function,
-            simulation_state_container=simulation_state_container,
-            max_steps_per_episode=max_steps_per_episode,
-            init_by_call=init_by_call,
-            obs_unit_kwargs=obs_unit_kwargs,
-            wait_for_obs=True,
-        )
-        for wrapper in wrappers or []:
-            env = wrapper(env)
-        return env
-
-    set_random_seed(seed)
-    return _init_env
-
-
-def _test_init_env_fnc(
     env_class: gym.Env,
     ns: Union[str, Namespace],
     space_manager: rosnav_rl.BaseSpaceManager,
@@ -193,7 +153,7 @@ def make_envs(
     """
 
     def create_env_fnc(ns: Union[str, Namespace]) -> callable:
-        return _test_init_env_fnc(
+        return _init_env_fnc(
             node=node,
             env_class=determine_env_class(None),
             ns=ns,
