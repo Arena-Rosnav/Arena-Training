@@ -314,7 +314,7 @@ def main():
         # Staged gated curriculum for Social-Dreamer (M6.1).
         # Only active when social.curriculum.enabled=true in config.
         _curriculum_cb = None
-        _social_cfg = getattr(getattr(config, "framework", None), "model", None)
+        _social_cfg = getattr(config.agent_config.framework, "model", None)
         _social_cfg = getattr(_social_cfg, "social", None) if _social_cfg else None
         if _social_cfg and getattr(_social_cfg, "enabled", False):
             _curriculum_cfg = getattr(_social_cfg, "curriculum", None)
