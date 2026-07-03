@@ -121,8 +121,3 @@ def setup_paths_dictionary(
     )
     if not is_debug_mode:
         trainer.paths.create_all()
-
-
-def load_yaml(file_path: str) -> dict:
-    with open(file_path) as file:
-        return yaml.load(file, Loader=yaml.FullLoader)
