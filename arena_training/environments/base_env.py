@@ -14,9 +14,7 @@ from geometry_msgs.msg import Twist
 
 from rcl_interfaces.srv import GetParameters as GetParametersSrv
 
-from rosnav_rl.observations.factory.factory import (
-    create_observation_manager_from_config,
-)
+from rosnav_rl.observations import ObservationManager
 from rosnav_rl.reward.reward_function import RewardFunction
 from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.cfg.parameters import AgentParameters
@@ -330,7 +328,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 ds.setdefault("params", {})["source_frame"] = self.robot_source_frame
 
         # Create the observation manager from the configuration
-        self.observation_collector = create_observation_manager_from_config(
+        self.observation_collector = ObservationManager.from_config(
             config=config,
             node=self.node,
             ns=self.robot_ns.to_string(),

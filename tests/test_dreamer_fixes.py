@@ -10,6 +10,7 @@ import types
 import importlib.util
 import importlib
 import math
+from pathlib import Path
 
 import torch
 import pytest
@@ -33,8 +34,8 @@ sys.modules["torch.utils.tensorboard"] = _tsb
 # rosnav_rl package __init__ which needs sb3_contrib / rclpy).
 # ---------------------------------------------------------------------------
 _BASE = (
-    "/home/tuananhroman/arena_ws/src/Arena/arena_training"
-    "/deps/rosnav_rl/rosnav_rl/rosnav_rl/model/dreamerv3"
+    Path(__file__).resolve().parent.parent
+    / "deps" / "rosnav_rl" / "rosnav_rl" / "rosnav_rl" / "model" / "dreamerv3"
 )
 
 
