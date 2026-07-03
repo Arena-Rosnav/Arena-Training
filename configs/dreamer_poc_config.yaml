@@ -327,7 +327,7 @@ arena_cfg:
           task.random.dynamic.n: [1, 1]
           task.random.static.models: [chair, table]
           task.random.interactive.models: []
-          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          task.random.dynamic.models: [Common/Human/arenian]
           goal_tolerance_radius: 0.5
 
         # Stage 2: More static + 1-3 pedestrians
@@ -336,7 +336,7 @@ arena_cfg:
           task.random.dynamic.n: [1, 3]
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
-          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          task.random.dynamic.models: [Common/Human/arenian]
           goal_tolerance_radius: 0.4
 
         # Stage 3: Dense environment — 3-5 pedestrians + full static clutter
@@ -345,7 +345,7 @@ arena_cfg:
           task.random.dynamic.n: [3, 5]
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
-          task.random.dynamic.models: [Common/Pedestrian/arenian]
+          task.random.dynamic.models: [Common/Human/arenian]
           goal_tolerance_radius: 0.3
 
   profiling: null
