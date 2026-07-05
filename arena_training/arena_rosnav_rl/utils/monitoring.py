@@ -1,5 +1,6 @@
 """Monitoring / experiment-tracking helpers (Weights & Biases)."""
 
+import logging
 import re
 from typing import List, TYPE_CHECKING
 
@@ -19,6 +20,8 @@ import wandb
 if TYPE_CHECKING:
     from ..cfg import TrainingCfg
 
+_logger = logging.getLogger(__name__)
+
 
 def setup_wandb(
     run_name: str = None,
@@ -28,7 +31,15 @@ def setup_wandb(
     to_watch: List[torch.nn.Module] = [],
 ) -> None:
     """Set up Weights and Biases (wandb) for training tracking."""
-    wandb.login()
+    try:
+        wandb.Api()  # cheap: raises UsageError if no API key is configured anywhere
+    except wandb.errors.UsageError:
+        _logger.warning(
+            "No W&B API key found (set WANDB_API_KEY or run `wandb login` once); "
+            "skipping wandb.login() to avoid blocking on an interactive prompt."
+        )
+    else:
+        wandb.login()
     wandb.init(
         name=run_name if run_name else config.arena_cfg.monitoring.wandb.run_name,
         group=group if group else config.arena_cfg.monitoring.wandb.group,
