@@ -534,6 +534,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 )
 
             self._reward_function.reset()
+            self._model_space_manager.reset_spaces()
 
             # Get the initial observation after reset.
             obs_dict = self.observation_collector.get_observations(
