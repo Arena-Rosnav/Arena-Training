@@ -151,7 +151,7 @@ agent_config:
         max_peds: 8
         node_feat_dim: 5          # [rel_x, rel_y, vel_x, vel_y, social_state]
         peds_recon_scale: 1.0
-        cell_type: gru            # M5.1: "gru" (default) or "transformer" (TransDreamerV3)
+        cell_type: gru            # "gru" (default), "transformer" (M5.1 attention-in-a-scan), "tssm" (M5.2 parallel observe)
         transformer_ctx_len: 64   # sliding-window length for TransformerCell
         transformer_num_heads: 4  # attention heads in TransformerCell
 
