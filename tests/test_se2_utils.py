@@ -144,10 +144,12 @@ class TestSe2Between:
         assert torch.allclose(result, expected, atol=TOL)
 
     def test_roundtrip(self):
+        # P = M_a^{-1} M_b, so M_b = M_a @ M_P — under se2_compose's
+        # apply-T1-first convention that is se2_compose(P, Ta).
         Ta = rand_pose()
         Tb = rand_pose()
         P = se2.se2_between(Ta, Tb)
-        Tb_recovered = se2.se2_compose(Ta, P)
+        Tb_recovered = se2.se2_compose(P, Ta)
         assert torch.allclose(Tb_recovered, Tb, atol=TOL)
 
 
@@ -316,6 +318,126 @@ class TestApplySe2ToPedsFlat:
         # After 90° rotation: vx -> vy
         assert abs(result[0, 2].item()) < TOL       # new vx ~ 0
         assert abs(result[0, 3].item() - 1.0) < TOL # new vy ~ 1
+
+
+# ---------------------------------------------------------------------------
+# Semantic frame-invariant tests (P6.2, audit 2026-07-06)
+#
+# The primitive tests above pin group algebra only; these pin the *frame
+# semantics* the canonicalization pipeline relies on, against the observation
+# generator's robot-frame convention (observations/utils/semantic.py):
+#     p_robot = R(yaw)^T (w - t)
+# They catch composition-order bugs that commuting (translation-only /
+# rotation-only) primitive cases cannot.
+# ---------------------------------------------------------------------------
+def world_to_robot(pose, w):
+    """Generator convention: world point w observed from robot pose (x, y, yaw)."""
+    x, y, th = pose[..., 0], pose[..., 1], pose[..., 2]
+    c, s = torch.cos(th), torch.sin(th)
+    dx, dy = w[..., 0] - x, w[..., 1] - y
+    return torch.stack([c * dx + s * dy, -s * dx + c * dy], dim=-1)
+
+
+class TestFrameSemantics:
+    def test_training_target_matches_anchor_observation(self):
+        # Invariant 5 (training path): anchor-frame target for a static ped
+        # must equal what a robot sitting at the anchor pose would observe.
+        # Requires nonzero anchor heading/translation to be meaningful —
+        # the buggy M_b @ M_a^{-1} convention passes only for anchor == identity.
+        torch.manual_seed(0)
+        for _ in range(20):
+            w = torch.randn(2) * 5                     # static ped, world frame
+            pose_a = rand_pose(1)[0]                   # anchor, theta_a != 0 almost surely
+            pose_k = rand_pose(1)[0]                   # robot pose at step k
+            p_r_k = world_to_robot(pose_k, w)          # robot-frame obs at k
+            expected = world_to_robot(pose_a, w)       # anchor-frame ped
+            P_k = se2.se2_between(pose_a.unsqueeze(0), pose_k.unsqueeze(0))
+            target = se2.se2_transform_points(P_k, p_r_k.view(1, 1, 2))[0, 0]
+            assert torch.allclose(target, expected, atol=1e-4), \
+                f"anchor-frame target {target} != {expected} (P_k={P_k})"
+
+    def test_imagination_correction_recovers_current_frame(self):
+        # Invariant 5 (imagination path): rotate 90° in place, then 1 m forward.
+        # True final pose (0, 1, pi/2). A ped decoded in the anchor frame must
+        # land at the true current-frame position after the inverse-P_k correction.
+        # Mixed rotation+translation is the case commuting tests cannot catch.
+        scale = torch.tensor([1.0, math.pi / 2])
+        P = torch.zeros(1, 3)
+        P = se2.integrate_se2(P, torch.tensor([[0.0, 1.0]]), scale, dt=1.0)  # rotate pi/2
+        P = se2.integrate_se2(P, torch.tensor([[1.0, 0.0]]), scale, dt=1.0)  # forward 1 m
+        pose_true = torch.tensor([0.0, 1.0, math.pi / 2])
+        assert torch.allclose(P[0], pose_true, atol=TOL), f"integrated pose {P[0]} != {pose_true}"
+
+        w = torch.tensor([2.0, 0.0])
+        p_anchor = world_to_robot(torch.zeros(3), w)   # anchor = start frame (identity)
+        expected = world_to_robot(pose_true, w)        # true current-frame obs
+        cur = se2.se2_transform_points(se2.se2_inverse(P), p_anchor.view(1, 1, 2))[0, 0]
+        assert torch.allclose(cur, expected, atol=1e-5), f"{cur} != {expected}"
+
+    def test_train_imagine_pose_rel_consistency(self):
+        # P_k derived from world poses (training, se2_between) and from chained
+        # body-frame deltas (imagination, integrate_se2) must agree. World poses
+        # computed with explicit trig, independent of se2_compose.
+        torch.manual_seed(1)
+        pose = rand_pose(1)[0].clone()                 # random start (the anchor)
+        anchor = pose.clone()
+        P_int = torch.zeros(1, 3)
+        scale = torch.ones(3)
+        for _ in range(8):
+            delta = torch.randn(3) * 0.3               # body-frame (dx, dy, dth)
+            # world-pose update via explicit trig
+            c, s = torch.cos(pose[2]), torch.sin(pose[2])
+            pose = torch.stack([
+                pose[0] + c * delta[0] - s * delta[1],
+                pose[1] + s * delta[0] + c * delta[1],
+                torch.atan2(torch.sin(pose[2] + delta[2]), torch.cos(pose[2] + delta[2])),
+            ])
+            # imagination path: holonomic action = the same body delta, dt=1
+            P_int = se2.integrate_se2(
+                P_int, delta.view(1, 3), scale, dt=1.0, holonomic=True
+            )
+            P_btw = se2.se2_between(anchor.unsqueeze(0), pose.unsqueeze(0))
+            assert torch.allclose(P_int, P_btw, atol=1e-4), \
+                f"imagination P {P_int} != training P {P_btw}"
+
+
+class TestComputePoseRel:
+    def test_first_step_is_identity(self):
+        poses = rand_pose(3).unsqueeze(1).repeat(1, 4, 1)  # (B=3, T=4, 3) constant
+        is_first = torch.zeros(3, 4)
+        is_first[:, 0] = 1.0
+        result = se2.compute_se2_relative_poses(poses, is_first)
+        assert torch.allclose(result, torch.zeros_like(result), atol=TOL)
+
+    def test_mid_sequence_reset_reanchors(self):
+        torch.manual_seed(2)
+        poses = rand_pose(6).view(1, 6, 3)                 # (B=1, T=6, 3), random walk
+        is_first = torch.zeros(1, 6)
+        is_first[0, 0] = 1.0
+        is_first[0, 3] = 1.0                               # new episode at t=3
+        result = se2.compute_se2_relative_poses(poses, is_first)
+        # reset steps are identity
+        assert torch.allclose(result[0, 0], torch.zeros(3), atol=TOL)
+        assert torch.allclose(result[0, 3], torch.zeros(3), atol=TOL)
+        # steps 1-2 relative to anchor t=0; steps 4-5 relative to anchor t=3
+        for t, a in ((1, 0), (2, 0), (4, 3), (5, 3)):
+            expected = se2.se2_between(poses[:, a], poses[:, t])
+            assert torch.allclose(result[:, t], expected, atol=TOL), (t, a)
+
+
+class TestPaddingRows:
+    def test_padding_rows_moved_by_transform(self):
+        # Pins CURRENT behavior: apply_se2_to_peds_flat transforms all-zero
+        # padding rows (validity 0) to the transform's translation. P6.4 will
+        # change this to leave padding untouched — update this test then.
+        N, F = 3, 5
+        T = torch.tensor([[1.0, 2.0, 0.0]])
+        peds = torch.zeros(1, N * (F + 1))                 # all padding
+        out = se2.apply_se2_to_peds_flat(T, peds, N, F)
+        for i in range(N):
+            base = i * (F + 1)
+            assert abs(out[0, base].item() - 1.0) < TOL
+            assert abs(out[0, base + 1].item() - 2.0) < TOL
 
 
 # ---------------------------------------------------------------------------
