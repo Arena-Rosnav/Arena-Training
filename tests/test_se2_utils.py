@@ -302,6 +302,8 @@ class TestApplySe2ToPedsFlat:
         B, N, F = 1, 2, 5
         T = torch.tensor([[1., 2., 0.]])
         peds = torch.zeros(B, N * (F + 1))
+        for i in range(N):
+            peds[0, i * (F + 1) + F] = 1.0  # mark rows valid (P6.4 masking)
         result = se2.apply_se2_to_peds_flat(T, peds, N, F)
         # All x positions shift by 1, y by 2
         for i in range(N):
@@ -314,6 +316,7 @@ class TestApplySe2ToPedsFlat:
         T = torch.tensor([[0., 0., math.pi / 2]])
         peds = torch.zeros(B, N * (F + 1))
         peds[0, 2] = 1.0  # vx = 1
+        peds[0, F] = 1.0  # mark row valid (P6.4 masking)
         result = se2.apply_se2_to_peds_flat(T, peds, N, F)
         # After 90° rotation: vx -> vy
         assert abs(result[0, 2].item()) < TOL       # new vx ~ 0
@@ -425,19 +428,60 @@ class TestComputePoseRel:
             assert torch.allclose(result[:, t], expected, atol=TOL), (t, a)
 
 
+class TestAugmentSe2:
+    def test_p_zero_returns_input_unchanged(self):
+        pose_rel = rand_pose(8).view(2, 4, 3)
+        out = se2.augment_se2(pose_rel, p=0.0)
+        assert torch.equal(out, pose_rel)
+
+    def test_shared_gauge_preserves_interstep_geometry(self):
+        # Anchor-gauge change P'_k = M_g^-1 @ M_Pk must leave the relative
+        # transform between any two steps invariant:
+        # between(P'_j, P'_k) == between(P_j, P_k).
+        torch.manual_seed(3)
+        pose_rel = rand_pose(6).view(1, 6, 3)
+        out = se2.augment_se2(pose_rel, p=1.0)
+        for j, k in ((0, 1), (2, 5), (1, 4)):
+            before = se2.se2_between(pose_rel[:, j], pose_rel[:, k])
+            after = se2.se2_between(out[:, j], out[:, k])
+            assert torch.allclose(before, after, atol=1e-4), (j, k)
+
+    def test_roundtrip_recovers_robot_frame_peds(self):
+        # Targets built from the augmented P'_k must inverse-transform back to
+        # the original robot-frame peds (the observe-time GAT-input path).
+        torch.manual_seed(4)
+        pose_rel = rand_pose(4).view(1, 4, 3)
+        out = se2.augment_se2(pose_rel, p=1.0)
+        peds = torch.randn(4, 1, 2)
+        for t in range(4):
+            P = out[:, t]
+            target = se2.se2_transform_points(P, peds[t].view(1, 1, 2))
+            back = se2.se2_transform_points(se2.se2_inverse(P), target)
+            assert torch.allclose(back[0, 0], peds[t, 0], atol=1e-4)
+
+
 class TestPaddingRows:
-    def test_padding_rows_moved_by_transform(self):
-        # Pins CURRENT behavior: apply_se2_to_peds_flat transforms all-zero
-        # padding rows (validity 0) to the transform's translation. P6.4 will
-        # change this to leave padding untouched — update this test then.
+    def test_padding_rows_pass_through_unchanged(self):
+        # Validity-aware transform (P6.4): all-zero padding rows (validity 0)
+        # must stay all-zero instead of being moved to T's translation.
         N, F = 3, 5
-        T = torch.tensor([[1.0, 2.0, 0.0]])
+        T = torch.tensor([[1.0, 2.0, 0.5]])
         peds = torch.zeros(1, N * (F + 1))                 # all padding
         out = se2.apply_se2_to_peds_flat(T, peds, N, F)
-        for i in range(N):
-            base = i * (F + 1)
-            assert abs(out[0, base].item() - 1.0) < TOL
-            assert abs(out[0, base + 1].item() - 2.0) < TOL
+        assert torch.equal(out, peds)
+
+    def test_valid_rows_transformed_padding_untouched(self):
+        # Mixed batch: one valid ped, one padding row.
+        N, F = 2, 4
+        T = torch.tensor([[1.0, 2.0, 0.0]])                # pure translation
+        peds = torch.zeros(1, N * (F + 1))
+        peds[0, 0:2] = torch.tensor([0.5, -0.5])           # valid ped position
+        peds[0, 2:4] = torch.tensor([0.1, 0.2])            # valid ped velocity
+        peds[0, F] = 1.0                                   # validity flag row 0
+        out = se2.apply_se2_to_peds_flat(T, peds, N, F)
+        assert torch.allclose(out[0, 0:2], torch.tensor([1.5, 1.5]), atol=TOL)
+        assert torch.allclose(out[0, 2:4], torch.tensor([0.1, 0.2]), atol=TOL)  # rot 0
+        assert torch.equal(out[0, F + 1 :], peds[0, F + 1 :])  # padding row all-zero
 
 
 # ---------------------------------------------------------------------------
