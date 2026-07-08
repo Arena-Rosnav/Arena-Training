@@ -183,19 +183,25 @@ agent_config:
       eval_every: 1000
 
   reward:
-    # RewardEMA percentile-normalizes imagined returns, so only reward-term *ratios*
-    # matter, not absolute magnitudes. Per-type pairs (ped_type_collision) encode a
-    # fixed child=2x adult severity ratio. Tune anchors, keep ratios.
+    # TGRF-style composite (Kim et al. 2024, Sensors 24(14):4540, arXiv:2402.14569) minus
+    # r_pred (their trajectory-prediction penalty needs a GST predictor; our world model
+    # does prediction implicitly, so we omit it). goal/collision/approach_goal follow
+    # their 10/-10/1.5 ratios; tgrf_discomfort uses their reported w_disc/sigma_disc/d_disc.
+    # proxemic_intrusion/social_potential dropped here to avoid double-counting discomfort
+    # (units remain in the codebase for ablations). RewardEMA percentile-normalizes
+    # imagined returns, so only reward-term *ratios* matter, not absolute magnitudes.
+    # Per-type pairs (ped_type_collision) encode a fixed child=2x adult severity ratio.
+    # Tune anchors, keep ratios.
     reward_function_dict:
       goal_reached:
-        reward: 15
+        reward: 10
       factored_safe_distance:
         factor: -0.2
       collision:
-        reward: -15
+        reward: -10
       approach_goal:
         _potential_based: true
-        factor: 0.3
+        factor: 0.15  # TGRF progress:goal ratio (1.5:10)
         gamma: 0.997
         _goal_update_threshold: 0.25
         _follow_subgoal: true
@@ -215,19 +221,10 @@ agent_config:
       angular_vel_constraint:
         penalty_factor: -0.01
         threshold: 0.5
-      proxemic_intrusion:
-        weight: 0.1
-        sigma_front: 1.2
-        sigma_back: 0.4
-        sigma_side: 0.6
-        activation_radius: 3.0
-        _on_safe_dist_violation: true
-      social_potential:
-        factor: 0.2
-        gamma: 0.997
-        clip_distance: 3.0
-        jump_threshold: 0.5
-        _on_safe_dist_violation: true
+      tgrf_discomfort:
+        weight: 0.25
+        sigma: 0.2
+        danger_zone_m: 0.5
 
 arena_cfg:
   general:
