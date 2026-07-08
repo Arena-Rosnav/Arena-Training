@@ -206,7 +206,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if not self._latest_fleet.robots:
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
 
-        robot = self._latest_fleet.robots[0]
+        robot = self._latest_fleet.robots[0].descriptor
         self.robot_ns = Namespace(robot.ns)
         base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
         self.robot_source_frame = posixpath.join(robot.frame, base_frame)
