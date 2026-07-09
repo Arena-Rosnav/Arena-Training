@@ -32,6 +32,10 @@ from arena_training.arena_rosnav_rl.utils.sim_bootstrap import (
     spawn_envs,
     wait_for_simulation,
 )
+from arena_training.arena_rosnav_rl.utils.tuning_recovery import (
+    ensure_envs_healthy,
+    release_trial_resources,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,22 +122,63 @@ def _set_timesteps(config_dict: dict, timesteps: int) -> None:
     )
 
 
-def _make_sb3_trainer(training_cfg, pruner, namespace_fn):
+def _pin_fixed_difficulty(config_dict: dict) -> None:
+    """Pin task difficulty for the duration of a tuning trial (best-effort).
+
+    Trials must be comparable to each other, so task difficulty must not
+    drift between trials the way it would during a real training run.
+    ``_TuningDreamerV3Trainer`` separately forces ``self._curriculum = None``
+    so the DreamerV3Curriculum stage-advance hook is never wired regardless
+    of this config; this also disables the (currently unwired-in-tuning,
+    but config-visible) Social-Dreamer model curriculum for consistency.
+    """
+    try:
+        config_dict["agent_config"]["framework"]["model"]["social"]["curriculum"][
+            "enabled"
+        ] = False
+    except (KeyError, TypeError):
+        pass
+
+
+class TrialTimeoutError(RuntimeError):
+    """Raised when a trial's training loop exceeds TuningCfg.trial_timeout_s.
+
+    A real exception (not optuna.TrialPruned) so study.optimize's
+    catch=(Exception,) records the trial FAILED, distinguishing "ran out of
+    time" from both a normal COMPLETE and a pruner-initiated PRUNED.
+    """
+
+
+def _make_sb3_trainer(training_cfg, pruner, namespace_fn, trial_timeout_s=None):
     """Return a StableBaselines3Trainer that injects *pruner* as a callback.
 
     The pruner is added alongside the existing ``eval_cb`` so that SB3's
     callback system drives both evaluation bookkeeping and Optuna reporting
     from the same training loop.
     """
+    import time
+
     from arena_training.arena_rosnav_rl.trainer import StableBaselines3Trainer
 
     class _TuningSB3Trainer(StableBaselines3Trainer):
         def _train_impl(self, *args, **kwargs) -> None:
-            from stable_baselines3.common.callbacks import CallbackList
+            from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
             cbs = [self.eval_cb]
             if pruner is not None:
                 cbs.append(pruner)
+            if trial_timeout_s is not None:
+                deadline = time.monotonic() + trial_timeout_s
+
+                class _TimeoutCallback(BaseCallback):
+                    def _on_step(self) -> bool:
+                        if time.monotonic() >= deadline:
+                            raise TrialTimeoutError(
+                                f"trial exceeded trial_timeout_s={trial_timeout_s}"
+                            )
+                        return True
+
+                cbs.append(_TimeoutCallback())
             combined = CallbackList(cbs) if len(cbs) > 1 else cbs[0]
 
             self.agent.train(
@@ -149,26 +194,44 @@ def _make_sb3_trainer(training_cfg, pruner, namespace_fn):
     return _TuningSB3Trainer(training_cfg, namespace_fn=namespace_fn)
 
 
-def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn):
+def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn, trial_timeout_s=None):
     """Return a DreamerV3Trainer that chains *pruner.after_eval_hook* with the
     curriculum hook so both receive each evaluation result.
     """
+    import time
+
     from arena_training.arena_rosnav_rl.trainer.dreamerv3_trainer import DreamerV3Trainer
 
     class _TuningDreamerV3Trainer(DreamerV3Trainer):
+        def _setup_curriculum(self) -> None:
+            # Tuning trials must be comparable to each other, so task
+            # difficulty must stay fixed for the whole study — never let
+            # DreamerV3Curriculum advance the obstacle/pedestrian stage,
+            # regardless of whether the base config defines a
+            # curriculum_definition. Equivalent to the already-supported
+            # has_curriculum() == False code path.
+            self._curriculum = None
+
         def _train_impl(self, *args, **kwargs) -> None:
             curriculum_hook = (
                 self._curriculum.after_eval_hook if self._curriculum else None
             )
             pruner_hook = pruner.after_eval_hook if pruner is not None else None
+            deadline = (
+                time.monotonic() + trial_timeout_s if trial_timeout_s is not None else None
+            )
 
             def _combined(eval_return: float) -> None:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TrialTimeoutError(
+                        f"trial exceeded trial_timeout_s={trial_timeout_s}"
+                    )
                 if curriculum_hook is not None:
                     curriculum_hook(eval_return)
                 if pruner_hook is not None:
                     pruner_hook(eval_return)
 
-            after_eval = _combined if (curriculum_hook or pruner_hook) else None
+            after_eval = _combined if (curriculum_hook or pruner_hook or deadline) else None
 
             fw_cfg = self.config.agent_config.framework
             logger.info(
@@ -185,6 +248,66 @@ def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn):
             logger.info("[Train] Training complete.")
 
     return _TuningDreamerV3Trainer(training_cfg, namespace_fn=namespace_fn)
+
+
+def _bootstrap_prefill_cache(
+    base_config_dict: dict,
+    namespace_fn: Callable[[int], str],
+    prefill_dir: Path,
+) -> None:
+    """One-time live-prefill collection into a directory shared by every trial.
+
+    DreamerV3's prefill_dataset() runs config.training.prefill_steps of
+    random-action rollout before real training starts. Every trial paying
+    that cost independently is redundant sim time; collect it once here
+    instead, and point every trial's general.offline_traindir at prefill_dir
+    so prefill_dataset() short-circuits to a no-op and load_episodes() reads
+    this cache directly (see rosnav_rl/model/dreamerv3/helper.py).
+
+    prefill_dir must never be written to again after this call returns — a
+    trial's own post-prefill training episodes must not land here, or later
+    trials' offline_traindir reads would pick up a trained policy's rollouts
+    instead of the shared random-policy prefill batch.
+    """
+    from copy import deepcopy
+
+    from rosnav_rl.model.dreamerv3.helper import (
+        load_episodes,
+        prefill_dataset,
+        prepare_directories,
+        set_runtime_configuration,
+    )
+
+    from arena_training.arena_rosnav_rl.cfg import TrainingCfg
+
+    bootstrap_dict = deepcopy(base_config_dict)
+    bootstrap_dict["agent_config"]["name"] = (
+        f"{bootstrap_dict['agent_config']['name']}_prefill_bootstrap"
+    )
+    general = bootstrap_dict["agent_config"]["framework"]["general"]
+    general["logdir"] = str(prefill_dir)
+    general["traindir"] = None
+    general["offline_traindir"] = None
+    _pin_fixed_difficulty(bootstrap_dict)
+
+    bootstrap_cfg = TrainingCfg.model_validate(bootstrap_dict)
+    trainer = _make_dreamerv3_trainer(bootstrap_cfg, None, namespace_fn)
+    try:
+        model = trainer.agent.model
+        set_runtime_configuration(model._algorithm_cfg)
+        prepare_directories(model._algorithm_cfg, model._logdir)
+        train_eps, _eval_eps = load_episodes(model._algorithm_cfg)
+        prefill_dataset(
+            model._algorithm_cfg,
+            trainer.environment.train_envs,
+            train_eps,
+            model._logger,
+            trainer.agent.action_space,
+            trainer.agent.observation_space,
+        )
+    finally:
+        trainer.close()
+
 
 def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[int], str]):
     """Return an Optuna objective function that runs one full trial."""
@@ -217,6 +340,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[i
         )
         if tuning_cfg.trial_timesteps is not None:
             _set_timesteps(trial_config, tuning_cfg.trial_timesteps)
+        _pin_fixed_difficulty(trial_config)
         if tuning_cfg.agents_dir is not None:
             trial_config["agents_dir"] = str(tuning_cfg.agents_dir)
 
@@ -234,7 +358,9 @@ def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[i
             )
         make_pruner, make_trainer = _tuning_registry[framework]
         pruner = make_pruner(trial)
-        trainer = make_trainer(training_cfg, pruner, namespace_fn)
+        trainer = make_trainer(
+            training_cfg, pruner, namespace_fn, trial_timeout_s=tuning_cfg.trial_timeout_s
+        )
 
         # \u2500\u2500 5. Run training \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         # Real exceptions propagate to study.optimize's catch=(Exception,),
@@ -306,6 +432,27 @@ def main() -> int:
     env_map = spawn_envs(n_envs, per_env_launch_args)
     namespace_fn = build_namespace_fn(env_map)
 
+    from rosnav_rl import SupportedRLFrameworks
+
+    framework = SupportedRLFrameworks(base_config_dict["agent_config"]["framework"]["name"])
+    if framework == SupportedRLFrameworks.DREAMER_V3:
+        if tuning_cfg.agents_dir is not None:
+            prefill_dir = tuning_cfg.agents_dir / f"{tuning_cfg.study_name}_prefill"
+            prefill_traindir = prefill_dir / "train_eps"
+            if prefill_traindir.exists() and any(prefill_traindir.iterdir()):
+                logger.info("Reusing existing shared prefill cache at %s", prefill_traindir)
+            else:
+                logger.info("Bootstrapping shared prefill cache at %s", prefill_traindir)
+                _bootstrap_prefill_cache(base_config_dict, namespace_fn, prefill_dir)
+            base_config_dict["agent_config"]["framework"]["general"]["offline_traindir"] = (
+                str(prefill_traindir)
+            )
+        else:
+            logger.info(
+                "tuning_cfg.agents_dir is not set — skipping shared prefill cache; "
+                "each trial will prefill independently"
+            )
+
     optuna_pruner = _build_optuna_pruner(tuning_cfg.pruner)
     study = optuna.create_study(
         study_name=tuning_cfg.study_name,
@@ -326,10 +473,23 @@ def main() -> int:
     logger.info("=" * 70)
 
     objective = make_objective(tuning_cfg, base_config_dict, namespace_fn)
+
+    def _after_trial(study: "optuna.Study", trial: "optuna.trial.FrozenTrial") -> None:
+        # Runs after every trial (COMPLETE, PRUNED, or FAILED) and before the
+        # next one starts. Mutates env_map in place; namespace_fn shares the
+        # same dict object, so a respawned env is picked up automatically.
+        release_trial_resources()
+        ensure_envs_healthy(env_map, per_env_launch_args)
+
     # catch=(Exception,): a trial that raises a real (non-TrialPruned) exception
     # is recorded FAILED and the study continues with the next trial, instead of
     # the whole process dying on one bad trial.
-    study.optimize(objective, n_trials=tuning_cfg.n_trials, catch=(Exception,))
+    study.optimize(
+        objective,
+        n_trials=tuning_cfg.n_trials,
+        catch=(Exception,),
+        callbacks=[_after_trial],
+    )
 
     logger.info("\n" + "=" * 70)
     logger.info("  Tuning Complete")
