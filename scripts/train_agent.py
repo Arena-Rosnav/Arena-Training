@@ -13,32 +13,46 @@ Usage:
     python3 train_agent.py --config /path/to/config.yaml
 """
 
-import asyncio
 import sys
 import logging
-import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
+# ros2 launch pipes this process's stdout/stderr through a non-tty pipe, which
+# forces Python's default block-buffering; without this, log lines written
+# shortly before exit can be delayed or lost in the launch log.
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# `launch` (pulled in transitively via arena_rclpy_mixins.Async, and by every
+# arena_training/rosnav_rl module imported below) calls
+# logging.setLoggerClass(LaunchLogger) as an import-time side effect, and
+# LaunchLogger.__init__ hardcodes propagate=False. Every logger.getLogger(name)
+# call anywhere in THIS process born after that point silently loses all its
+# INFO/DEBUG output (only WARNING+ survives, via logging.lastResort). This
+# process never runs an actual launch description, so `launch`'s own console
+# formatting is irrelevant here — neutralize the mutation before it can fire.
+logging.setLoggerClass = lambda cls: None
+
 import torch
 import rclpy
-import rclpy.qos
-from rclpy.node import Node
-from rosgraph_msgs.msg import Clock
-from arena_runtime_msgs.srv import SpawnEnv
-
-from arena_rclpy_mixins.Async import AsyncNode, ClientWrapper
 
 # Import arena_training subpackages
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
+from arena_training.arena_rosnav_rl.utils.sim_bootstrap import (
+    build_namespace_fn,
+    spawn_envs,
+    wait_for_simulation,
+)
 from arena_training.arena_rosnav_rl.trainer import get_trainer
 from arena_training.arena_rosnav_rl.social_curriculum import SocialCurriculumCallback
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -54,117 +68,6 @@ def _stage(label: str):
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
 # torch._dynamo.config.disable = True
-
-
-async def _spawn_envs(
-    n_envs: int,
-    per_env_launch_args: list[list[str]],
-) -> dict[int, str]:
-    """Call /arena/spawn_env n_envs times in parallel; returns idx -> ns map."""
-    node = AsyncNode("_spawn_envs_node")
-    executor = rclpy.executors.MultiThreadedExecutor()
-    executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, daemon=True)
-    spin_thread.start()
-
-    try:
-        cli: ClientWrapper = node.create_client_wrapper(
-            SpawnEnv, "/arena/spawn_env", timeout=300.0
-        )
-        node.get_logger().info("waiting for /arena/spawn_env")
-        await cli.ensure()
-        node.get_logger().info("/arena/spawn_env is ready")
-
-        async def _one(idx: int) -> tuple[int, str]:
-            req = SpawnEnv.Request()
-            req.headless = True
-            req.launch_args = list(per_env_launch_args[idx])
-            t_call = time.monotonic()
-            resp = await cli.call_timeout(req)
-            if resp is None:
-                raise RuntimeError(f"SpawnEnv {idx} timed out")
-            log_hint = f" (log: {resp.log_path})" if resp.log_path else ""
-            if not resp.success:
-                raise RuntimeError(f"SpawnEnv {idx} failed: {resp.error_msg}{log_hint}")
-            node.get_logger().info(
-                f"env {idx} spawned at {resp.ns} in {time.monotonic() - t_call:.1f}s{log_hint}"
-            )
-            return idx, resp.ns
-
-        results = await asyncio.gather(
-            *[_one(i) for i in range(n_envs)], return_exceptions=True
-        )
-        env_map: dict[int, str] = {}
-        errors: list[BaseException] = []
-        for r in results:
-            if isinstance(r, BaseException):
-                errors.append(r)
-                node.get_logger().error(f"spawn failed: {r!r}")
-            else:
-                idx, ns = r
-                env_map[idx] = ns
-        if errors:
-            raise RuntimeError(f"{len(errors)}/{n_envs} envs failed to spawn") from errors[0]
-        return env_map
-    finally:
-        executor.shutdown()
-        node.destroy_node()
-
-
-def spawn_envs(n_envs: int, per_env_launch_args: list[list[str]]) -> dict[int, str]:
-    """Synchronous entry point: spawn N envs and return idx -> ns map."""
-    return asyncio.run(_spawn_envs(n_envs, per_env_launch_args))
-
-
-def wait_for_simulation(timeout: float = 120.0) -> bool:
-    """Block until the simulation is fully loaded.
-
-    Waits for the first message on ``/clock`` which Gazebo (and other
-    simulators) only starts publishing once the physics engine is ready.
-
-    Args:
-        timeout: Maximum seconds to wait before giving up.
-
-    Returns:
-        ``True`` if the clock was received, ``False`` on timeout.
-    """
-    logger.info("Waiting for simulation (listening for /clock)...")
-    event = threading.Event()
-
-    node = Node("_wait_for_sim")
-
-    def _cb(msg: Clock):
-        event.set()
-
-    # Gazebo publishes /clock with BEST_EFFORT reliability. A default (RELIABLE)
-    # subscription is QoS-incompatible and silently drops every message, which
-    # used to burn the full 120s timeout.
-    clock_qos = rclpy.qos.QoSProfile(
-        depth=1,
-        reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
-        history=rclpy.qos.HistoryPolicy.KEEP_LAST,
-    )
-    node.create_subscription(Clock, "/clock", _cb, clock_qos)
-
-    # Spin in a background thread so the subscription can receive
-    executor = rclpy.executors.SingleThreadedExecutor()
-    executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, daemon=True)
-    spin_thread.start()
-
-    received = event.wait(timeout=timeout)
-
-    executor.shutdown()
-    node.destroy_node()
-
-    if received:
-        logger.info("Simulation is ready (/clock received).")
-    else:
-        logger.warning(
-            f"Timed out after {timeout}s waiting for /clock. "
-            "Proceeding anyway — the simulation may not be fully loaded."
-        )
-    return received
 
 
 def get_config_path(args) -> Path:
@@ -301,8 +204,7 @@ def main():
 
         logger.info("building trainer for framework=%s", config.agent_config.framework.name)
 
-        def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
-            return m[idx]
+        namespace_fn = build_namespace_fn(env_map)
 
         with _stage("get_trainer (agent + envs + model)"):
             trainer = get_trainer(config, namespace_fn=namespace_fn)
