@@ -71,6 +71,37 @@ def _build_optuna_pruner(pruner_cfg):
     raise ValueError(f"Unknown pruner type: {pruner_cfg.type!r}")
 
 
+def _build_optuna_sampler(sampler_cfg):
+    """Instantiate an Optuna sampler from ``SamplerCfg``."""
+    import optuna
+
+    if sampler_cfg.type == "tpe":
+        return optuna.samplers.TPESampler(
+            seed=sampler_cfg.seed,
+            multivariate=sampler_cfg.multivariate,
+            n_startup_trials=sampler_cfg.n_startup_trials,
+        )
+    raise ValueError(f"Unknown sampler type: {sampler_cfg.type!r}")
+
+
+def _resolve_storage(tuning_cfg) -> str | None:
+    """Default TuningCfg.storage to a sqlite file under agents_dir if unset.
+
+    An unset storage means an in-memory study — results are lost the
+    moment the process exits, and load_if_exists=True can't resume a
+    crashed run. Defaulting to a file next to the trial artifacts gives
+    both for free, without requiring every tuning config to spell it out.
+    """
+    if tuning_cfg.storage is not None:
+        return tuning_cfg.storage
+    if tuning_cfg.agents_dir is None:
+        return None
+    tuning_cfg.agents_dir.mkdir(parents=True, exist_ok=True)
+    storage = f"sqlite:///{tuning_cfg.agents_dir / f'{tuning_cfg.study_name}.db'}"
+    logger.info("No storage configured — defaulting to %s", storage)
+    return storage
+
+
 def _resolve_base_config(tuning_cfg_path: Path, base_config: Path) -> Path:
     """Resolve *base_config* relative to the tuning config\u2019s directory."""
     if base_config.is_absolute() and base_config.exists():
@@ -138,6 +169,26 @@ def _pin_fixed_difficulty(config_dict: dict) -> None:
         ] = False
     except (KeyError, TypeError):
         pass
+
+
+def _pin_wandb_group(config_dict: dict, study_name: str) -> None:
+    """Group every trial's W&B run under the study name (best-effort)."""
+    try:
+        config_dict["arena_cfg"]["monitoring"]["wandb"]["group"] = study_name
+    except (KeyError, TypeError):
+        pass
+
+
+def _social_context_enabled(config_dict: dict) -> bool:
+    """Whether this trial's config has social.context.enabled=True."""
+    try:
+        return bool(
+            config_dict["agent_config"]["framework"]["model"]["social"]["context"][
+                "enabled"
+            ]
+        )
+    except (KeyError, TypeError):
+        return False
 
 
 class TrialTimeoutError(RuntimeError):
@@ -315,15 +366,23 @@ def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[i
     from rosnav_rl.tuning import apply_params, suggest_params, SB3TrialPruner, DreamerV3TrialPruner
 
     # Maps each supported framework to (pruner_factory, trainer_factory).
-    # pruner_factory(trial) → framework-specific TrialPruner
+    # pruner_factory(trial, trial_config) → framework-specific TrialPruner
     # trainer_factory(training_cfg, pruner, namespace_fn) → ArenaTrainer subclass
     _tuning_registry = {
         SupportedRLFrameworks.STABLE_BASELINES3: (
-            lambda trial: SB3TrialPruner(trial, metric=tuning_cfg.metric, verbose=1),
+            lambda trial, trial_config: SB3TrialPruner(
+                trial, metric=tuning_cfg.metric, verbose=1
+            ),
             _make_sb3_trainer,
         ),
         SupportedRLFrameworks.DREAMER_V3: (
-            lambda trial: DreamerV3TrialPruner(trial, verbose=1),
+            lambda trial, trial_config: DreamerV3TrialPruner(
+                trial,
+                metric=tuning_cfg.metric,
+                health_prune=tuning_cfg.health_prune,
+                social_context_enabled=_social_context_enabled(trial_config),
+                verbose=1,
+            ),
             _make_dreamerv3_trainer,
         ),
     }
@@ -341,6 +400,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[i
         if tuning_cfg.trial_timesteps is not None:
             _set_timesteps(trial_config, tuning_cfg.trial_timesteps)
         _pin_fixed_difficulty(trial_config)
+        _pin_wandb_group(trial_config, tuning_cfg.study_name)
         if tuning_cfg.agents_dir is not None:
             trial_config["agents_dir"] = str(tuning_cfg.agents_dir)
 
@@ -357,7 +417,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[i
                 f"Supported: {[f.value for f in _tuning_registry]}"
             )
         make_pruner, make_trainer = _tuning_registry[framework]
-        pruner = make_pruner(trial)
+        pruner = make_pruner(trial, trial_config)
         trainer = make_trainer(
             training_cfg, pruner, namespace_fn, trial_timeout_s=tuning_cfg.trial_timeout_s
         )
@@ -454,11 +514,13 @@ def main() -> int:
             )
 
     optuna_pruner = _build_optuna_pruner(tuning_cfg.pruner)
+    optuna_sampler = _build_optuna_sampler(tuning_cfg.sampler)
     study = optuna.create_study(
         study_name=tuning_cfg.study_name,
         direction=tuning_cfg.direction,
-        storage=tuning_cfg.storage,
+        storage=_resolve_storage(tuning_cfg),
         pruner=optuna_pruner,
+        sampler=optuna_sampler,
         load_if_exists=True,
     )
 
