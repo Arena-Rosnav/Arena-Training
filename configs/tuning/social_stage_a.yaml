@@ -1,0 +1,69 @@
+# Stage A — context identifiability screen (P7.4).
+#
+# Goal: find kl_scale/pred_scale/b_dim/window settings where the cSRSSM
+# context code `b` stays live and identifiable (context_pred_gap holds
+# clearly above zero), before spending Stage B's much larger task-performance
+# budget. Everything else is fixed at social_csrssm_config.yaml's values —
+# we don't need good navigation behavior here, only a non-collapsed context.
+#
+# ~30 trials x 200k steps ~= 45 min/trial with health pruning ~= ~20 GPU-h.
+#
+# Run with:
+#   python3 scripts/tune_agent.py --tuning-config configs/tuning/social_stage_a.yaml
+#
+# agents_dir is left unset — resolves via TrainingCfg's own
+# ROSNAV_AGENTS_DIR env var / default (see arena_rosnav_rl/cfg/train.py).
+# Set it explicitly below (or export ROSNAV_AGENTS_DIR) before a real run so
+# the study gets persistent sqlite storage and a shared prefill cache
+# instead of falling back to in-memory-only, no-cache behavior.
+# agents_dir: /path/to/persistent/tuning_agents
+
+base_config: ../social_csrssm_config.yaml
+
+study_name: social_stage_a
+n_trials: 30
+direction: maximize
+# NOTE: DreamerV3TrialPruner.best_metric tracks max() over all reported evals
+# (see rosnav_rl/tuning/pruner/pruner_base.py), not a literal rolling mean of
+# the last 3 evals. context_pred_gap should be fairly stable/monotonic near
+# convergence, so max-of-evals is a reasonable proxy for "did this trial ever
+# reach a live, identifiable context" — but it is not exactly the windowed
+# mean described in the audit's Stage A objective. A true windowed-mean
+# metric would need new pruner state and is out of scope of what P7.3 built.
+metric: context_pred_gap
+trial_timesteps: 200000
+
+pruner:
+  # Health pruning (below) is the primary early-kill mechanism for Stage A;
+  # the step-based Optuna pruner is disabled to avoid two independent
+  # pruning signals fighting over short, cheap 200k-step trials.
+  type: none
+
+health_prune:
+  enabled: true
+  min_gap: 0.0
+  after_steps: 75000
+  patience: 2
+
+sampler:
+  type: tpe
+  multivariate: true
+  n_startup_trials: 10
+
+search_space:
+  agent_config.framework.model.social.context.kl_scale:
+    type: float
+    low: 0.05
+    high: 5.0
+    log: true
+  agent_config.framework.model.social.context.pred_scale:
+    type: float
+    low: 0.02
+    high: 1.0
+    log: true
+  agent_config.framework.model.social.context.b_dim:
+    type: categorical
+    choices: [8, 16, 32]
+  agent_config.framework.model.social.context.window:
+    type: categorical
+    choices: [8, 16, 32]

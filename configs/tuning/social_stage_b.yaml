@@ -1,0 +1,82 @@
+# Stage B — task performance search (P7.4).
+#
+# Run after Stage A; freeze its winning kl_scale/pred_scale/b_dim/window
+# into social_csrssm_config.yaml (or override them below under
+# search_space's fixed values by editing base_config) before starting this
+# stage. Optimizes for actual navigation performance via success_composite.
+#
+# ~50 trials x 500k steps ~= 1.8 h/trial; median pruner from 100k steps
+# trims mean trial cost to ~60% ~= ~55 GPU-h.
+#
+# Run with:
+#   python3 scripts/tune_agent.py --tuning-config configs/tuning/social_stage_b.yaml
+#
+# agents_dir is left unset — see social_stage_a.yaml's comment for the
+# resolution order. Set it explicitly (or export ROSNAV_AGENTS_DIR) before a
+# real run.
+# agents_dir: /path/to/persistent/tuning_agents
+
+base_config: ../social_csrssm_config.yaml
+
+study_name: social_stage_b
+n_trials: 50
+direction: maximize
+metric: success_composite
+trial_timesteps: 500000
+
+pruner:
+  type: median
+  n_startup_trials: 8
+  # report-steps are once per eval (eval_every=1e4 env steps in the base
+  # config), so n_warmup_steps=10 means no pruning before ~100k env steps.
+  n_warmup_steps: 10
+
+sampler:
+  type: tpe
+  # Joint modeling matters here: train_ratio interacts with model_lr/actor.lr
+  # (higher train_ratio wants a lower lr for stability).
+  multivariate: true
+  n_startup_trials: 10
+
+search_space:
+  agent_config.framework.training.train_ratio:
+    type: categorical
+    choices: [8, 16, 32, 64]
+  agent_config.framework.training.model_lr:
+    type: float
+    low: 3.0e-5
+    high: 3.0e-4
+    log: true
+  # NOTE: the audit's search-space table ties critic.lr to actor.lr (one
+  # sampled value applied to both). apply_params only supports independent
+  # dot-notation overrides, so this search space tunes actor.lr alone;
+  # model.critic.lr stays at the base config's fixed value (3.0e-5) unless
+  # you edit social_csrssm_config.yaml to match by hand between trials.
+  agent_config.framework.model.actor.lr:
+    type: float
+    low: 1.0e-5
+    high: 1.0e-4
+    log: true
+  agent_config.framework.model.actor.entropy:
+    type: float
+    low: 1.0e-4
+    high: 3.0e-3
+    log: true
+  agent_config.framework.model.behavior.imag_horizon:
+    type: categorical
+    choices: [10, 15, 20]
+  agent_config.framework.model.social.gat.out_dim:
+    type: categorical
+    choices: [32, 64, 128]
+  agent_config.framework.model.social.gat.layers:
+    type: categorical
+    choices: [1, 2, 3]
+  agent_config.framework.model.social.peds_recon_scale:
+    type: float
+    low: 0.3
+    high: 3.0
+    log: true
+  agent_config.framework.model.social.se2_augment_prob:
+    type: float
+    low: 0.0
+    high: 0.9
