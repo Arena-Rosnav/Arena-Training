@@ -525,6 +525,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                     f"[{self.env_ns.to_string()}] Resetting environment after episode {prev_id}..."
                 )
 
+                # Defensively release any pending/leaked training_env_pause hold
+                # before waiting for the new episode. reset_task drives
+                # task_generator, which must be able to *step* the sim to publish
+                # the next RUNNING episode; if the sim is paused (e.g. a lazy-pause
+                # hold that leaked), _wait_for_new_episode would deadlock forever.
+                self.pause(False)
+
                 self._before_task_reset()
                 self.reset_task()
                 self._wait_for_new_episode(prev_id)
@@ -567,9 +574,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def pause(self, paused: bool) -> None:
         """Lazy pause/unpause: pause(True) only fires if inference takes longer
         than ``_pause_lazy_threshold``; pause(False) cancels any pending pause
-        and unconditionally issues an unpause. Race-safe: a token is checked in
-        the timer callback so a late-firing timer that lost the race against
-        ``pause(False)`` does not send a stray PAUSE."""
+        and unconditionally issues an unpause.
+
+        Race-safe against the lazy timer: both the timer-fired ACQUIRE
+        (``_maybe_fire_pause``) and this method's RELEASE issue their
+        ``_fire_pause_request`` **while holding ``_pause_lock``**. That
+        serialization guarantees the two cannot be reordered — either the
+        ACQUIRE fires first and this RELEASE cancels it (net zero), or this
+        RELEASE nulls the token first and the timer callback sees the mismatch
+        and never fires the ACQUIRE (net zero). Firing outside the lock allowed
+        a RELEASE to overtake an in-flight ACQUIRE, leaking a ``training_env_pause``
+        hold at count 1 and wedging the sim paused (self-deadlock on the next
+        episode reset)."""
         if self._pause_srv is None:
             return
         with self._pause_lock:
@@ -588,11 +604,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 timer.daemon = True
                 self._pause_pending_timer = timer
                 timer.start()
-                fire_unpause_now = False
             else:
-                fire_unpause_now = True
-        if fire_unpause_now:
-            self._fire_pause_request(False)
+                # Fire RELEASE under the lock so it cannot land ahead of a
+                # concurrent timer-fired ACQUIRE (which also fires under the lock).
+                self._fire_pause_request(False)
 
     def _maybe_fire_pause(self, token: object) -> None:
         with self._pause_lock:
@@ -600,7 +615,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 return
             self._pause_pending_token = None
             self._pause_pending_timer = None
-        self._fire_pause_request(True)
+            # Fire ACQUIRE under the lock (see pause()): serialized against a
+            # concurrent pause(False) RELEASE so the two cannot land out of order.
+            self._fire_pause_request(True)
 
     def _fire_pause_request(self, paused: bool) -> None:
         if self._pause_srv is None:
