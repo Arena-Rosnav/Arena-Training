@@ -33,7 +33,7 @@ the full pipeline inside RosNav-RL and Arena 5.0.
 
 | # | Contribution | One-line impact |
 |---|---|---|
-| C1 | Social-RSSM — GAT interaction topology inside the world-model latent | First social graph in the *latent state* rather than the policy; the structural prior H1a tests |
+| C1 | Social-RSSM — GAT interaction topology conditioning the world-model *transition* (and readout) | First social graph inside the latent *transition kernel*, not just a policy feature — observed crowd in training, imagined crowd in rollout; the structural prior H1a tests |
 | C2 | cSRSSM — crowd-behavior context b as a Hidden-Parameter-MDP extension of the DreamerV3 ELBO, with prediction-driven identifiability | A *derived* objective, not a loss stack; enables counterfactual social imagination, measured (§4.3), not asserted |
 | C3 | DALI-style dynamics context dₜ | Self-supervised sim-to-sim OOD interpolation, tested against a held-out driver fitted to real interaction data |
 | C4 | TSSM backbone — obs-only posterior, fully parallel observe(), verified exactly equivalent to the sequential formulation | Removes the RSSM's sequential training bottleneck; completes a three-way backbone ablation |
@@ -63,11 +63,24 @@ current recurrent context.
 ```
 cₜ = GAT({xᵢᵖᵉᵈ}ᵢ₌₁..ₙ, hₜ)
 sₜˢᵒᶜⁱᵃˡ = (hₜ, zₜ, cₜ)
+prior:  p(zₜ₊₁ | hₜ, zₜ, aₜ, cₜ)      # cₜ conditions the transition kernel
 ```
 
-The augmented state sₜˢᵒᶜⁱᵃˡ feeds the reward predictor, value function, and actor. The world model
-can generate imagined rollouts in which crowd dynamics respond to different candidate action
-sequences, enabling anticipatory rather than purely reactive behavior.
+The augmented state sₜˢᵒᶜⁱᵃˡ feeds the reward predictor, value function, and actor; the interaction
+code cₜ additionally conditions the RSSM transition itself (`gat.condition_transition`), so the graph
+shapes *how the latent evolves*, not only how it is read out. This is what places the social graph
+in the transition kernel rather than in a policy feature. Because the transition prior is imagined —
+no observation is available at t+1 — the graph is computed from the *observed* crowd during training
+(the ground-truth node-set at the previous step) and from the *decoded* crowd during imagined
+rollouts, the same teacher-forcing asymmetry the RSSM already uses for observations. Concretely,
+cₜ = GAT(crowd at t, hₜ) conditions the transition out of step t; the transition into t is thus
+conditioned on the crowd the robot actually saw before acting. The world model can then generate
+imagined rollouts in which crowd dynamics respond to different candidate action sequences, enabling
+anticipatory rather than purely reactive behavior. The conditioning is gated (default off, giving a
+byte-identical readout-only baseline) so H1a can ablate readout-only vs. transition-conditioned GAT
+directly. Transition conditioning adds one GAT evaluation per imagined step, a cost the earlier
+readout-only design deliberately avoided; H1a's sub-ablation measures whether that cost buys
+cross-driver robustness.
 
 **Key claim**: pedestrian interaction topology is invariant across simulators — only avoidance
 magnitude and dynamics shape differ. Encoding topology explicitly gives the RSSM a structural
@@ -230,12 +243,33 @@ heading-coupled rotational/lateral avoidance dynamics absent from both training 
 genuine out-of-distribution regime rather than a re-parameterization. The primary result: SR_HSFM,
 with the gap SR_SFM − SR_HSFM as the generalization metric.
 
-*Note on realism.* This is a weaker realism claim than a real-data-fitted held-out driver would
-support — HSFM is an analytical model, not fitted to human trajectories. We make the honest,
-reproducible claim (transfer to a structurally novel *analytical* regime) rather than the stronger
-but currently unsupportable one: the only real-data-fitted candidate (NeuRoSFM, PeRoI dataset) has
-neither public code nor public data. humansim's GAIL-imitation driver (`socialgail`) is a possible
-future real-data-fitted held-out target and is noted as such in §7.
+**Second held-out driver: `socialgail`.** humansim additionally ships a GAIL-imitation driver
+(learned from human trajectory data; weights fetched at instantiation, verified loadable) that is
+structurally disjoint from the entire force-based family. It serves as held-out driver #2,
+upgrading the realism claim: transfer is reported both to a structurally novel *analytical* regime
+(HSFM: heading-coupled rotational/lateral avoidance absent from both training drivers) and to a
+*learned, data-fitted* regime (socialgail). Both are eval-only — no training compute. `nsp`
+(Neural Social Physics, also learned) is the designated fallback if socialgail proves unstable in
+long eval batches.
+
+**Driver assignment (compact, fixed for the paper).** Training DR: {ORCA, de-tuned SFM} only.
+Held-out eval: {HSFM, socialgail}. Appendix reserve (robustness table, eval-only, run on the final
+headline checkpoint if reviewer-requested): the DRL crowd drivers {sarl, cadrl, dsrnn, drlvo} and
+nsp. `straight` is excluded (trivial dynamics). This keeps the training distribution at two
+drivers (the DR contrast stays clean: 2-driver DR vs 1-driver ablation) and the headline held-out
+axis at two structurally distinct regimes, without letting the driver zoo inflate the run matrix.
+
+Two driver *families* is moreover structurally forced by the inventory: humansim's analytical
+drivers are exactly {SFM, ORCA, HSFM, straight} — a third training family would have to consume
+HSFM (destroying held-out #1) or a learned driver (poor ground-truth crowd dynamics: per-ped NN
+inference each tick, behavior fitted to its own training setting). The regime diversity the
+context code b actually needs comes from *within-family parameter randomization* instead: SFM
+already exposes `ParamDist` over relaxation time, repulsion strength/range, and anisotropy (a
+continuous regime family); ORCA is extended with the analogous `ParamDist` over its avoidance
+parameters (time horizon, neighbor distance) so that neither training family collapses to a
+single point in regime space. The training distribution is thus two continuous parameter
+families — the HiP-MDP setting b is derived from — rather than two discrete modes a binary
+classifier could satisfy.
 
 ### 2.4 Uncertainty-Aware Safety Layer (stretch)
 
@@ -287,6 +321,11 @@ robustness beyond flat observation encoding?
   Isolates the structural contribution of the GAT. This is tested along a second structural axis
   alongside the GAT: whether cSRSSM's crowd-behavior context conditioning (§2.1) provides an
   additional, independent reduction in worst-case cross-driver degradation beyond the GAT alone.
+  A third sub-ablation isolates *where* the GAT acts: readout-only (cₜ augments the feature) vs.
+  transition-conditioned (`gat.condition_transition`, cₜ also conditions the prior, §2.1). If the
+  transition-conditioned variant improves worst-case cross-driver SR over readout-only, the graph
+  is contributing as a dynamics prior, not merely a richer policy feature — the distinction the C1
+  claim rests on. The readout-only setting is the byte-identical baseline (flag off).
 - **H1b — DR amplification.** The SR gap between GAT-DALI-Dreamer (DR) and DR-DreamerV3 is larger
   than the gap between GAT-Dreamer (single) and vanilla DreamerV3. Tests whether relational
   structure amplifies domain randomization beyond what flat-encoder DR achieves. The
@@ -326,9 +365,9 @@ pedestrian driver changes?
 |---|---|
 | Simulator | Arena 5.0 |
 | Pedestrian drivers (train) | ORCA, SFM (tuned distinct from HSFM) — uniform per episode |
-| Pedestrian drivers (held-out) | HSFM (heading-coupled, unseen in training) |
-| Robot | TurtleBot3 Burger (differential drive) |
-| Action space | Continuous: v_lin ∈ [0, 0.5] m/s, v_ang ∈ [−1.0, 1.0] rad/s |
+| Pedestrian drivers (held-out) | HSFM (heading-coupled, unseen in training) + socialgail (GAIL-learned, data-fitted; §2.3) |
+| Robot | Clearpath Jackal (differential drive), v_lin capped at 1.0 m/s ≈ pedestrian walking speed — the regime where anticipatory crowd reasoning is load-bearing (an uncapped ~2 m/s robot simply outruns the crowd and the social-module ablation deltas collapse). ~2× TurtleBot3's 0.5 m/s ⇒ ~2× more episodes (resets, terminal rewards, crowd-regime draws for b) per fixed 5M-step budget |
+| Action space | Continuous: v_lin ∈ [0, 1.0] m/s, v_ang ∈ [−1.0, 1.0] rad/s |
 | Observations | LiDAR 360°/720 rays + pedestrian detections (x, y, vₓ, v_y) for N ≤ 8 |
 | Training steps | 5M environment steps per ablation run |
 | Hardware | RunPod A100 40 GB, ~18 h/run |
@@ -345,6 +384,7 @@ pedestrian driver changes?
 | HEIGHT (policy) | 1 | ✓ | | | ✓ | Model-free SOTA GAT baseline, matched observation space and step budget |
 | DreamerV3 (single) | 2 | | | | | ORCA only; quantifies what DR alone buys |
 | DALI-Dreamer (DR) | 2 | | ✓ | | ✓ | C3 without C1 — does dₜ need topology? |
+| GAT-DALI-cSRSSM-Dreamer (readout-only GAT) | 2 | ✓ | ✓ | ✓ (K=16) | ✓ | Full system with `gat.condition_transition` off — attributes C1 between transition-conditioning and readout pathways (H1a sub-ablation, §2.1) |
 | TSSM-GAT-DALI-cSRSSM-Dreamer | 2 | ✓ | ✓ | ✓ (K=16) | ✓ | C4: GRU → Transformer backbone ablation of the full system (§2.1, three-way axis): TSSM — obs-only posterior + fully parallel observe(), sequential KV-cached imagination; b conditions the token embedding. Intermediate variant (attention-in-a-scan sliding-window cell, ctx_len=64) isolates attention from parallelism; viable on the stated A100 40GB, OOMs on ≤8GB dev hardware without the KV cache |
 | CrowdNav++ (policy) | opt. | ✓ | | | | Older model-free graph baseline; run only if reviewer-requested — HEIGHT supersedes it |
 
@@ -352,9 +392,13 @@ pedestrian driver changes?
 (context only), GAT-DALI (DALI only), GAT-DALI-cSRSSM (both) — plus the flat-encoder and
 model-free anchors. Each 2×2 cell removes exactly one mechanism, and the pooled-vs-per-pedestrian
 target firewall (§2.1) guarantees the two axes cannot silently re-implement one another. **Tier 2**
-is run only after Tier 1 clears its gate (§4.5). Compute: Tier 1 = 4 × 5 seeds + 2 × 3 seeds
-= 26 runs ≈ 470 A100-hours; Tier 2 adds 9 runs ≈ 160 h. Model-free baselines are substantially
-cheaper and do not dominate the budget.
+is run only after Tier 1 clears its gate (§4.5). Compute (seed-escalation protocol): Tier 1 runs
+at **3 seeds per cell** first — 6 configs × 3 = 18 runs ≈ 330 A100-hours — and seeds 4–5 are added
+*only* to cells whose worst-case-SR IQM CIs overlap the headline's (typically the "both" and
+"neither" cells; worst case +4 runs → 22). This front-loads the go/no-go readout at ~70% of the
+naive 26-run budget and spends the reserve only where the statistics demand it. Tier 2 adds up to
+8 runs ≈ 145 h at 2–3 seeds (diagnostic rows need trend, not CIs). Model-free baselines are
+substantially cheaper and do not dominate the budget.
 
 ### 4.3 Metrics
 
@@ -408,7 +452,7 @@ Total inference: ~7 ms — well within the 100 ms navigation control cycle.
 |---|---|---|
 | **0 — done** | All four contributions implemented and unit-verified: TSSM parallel/sequential exact-equivalence test, KV-cache equivalence test, b-identifiability test (informative b beats shuffled b), smoke configs | — |
 | **1 — diagnostics** | Instrument before spending compute: persistence-floor logging, linear probe (b → driver ID), counterfactual-consistency eval, backbone throughput benchmark; then one full-system pilot run on the A100 | Floor gap > 0 and probe accuracy > chance on the pilot — i.e., the context code demonstrably not collapsed. If the gate fails, apply the second-moment mitigation (§2.1) before Phase 2 |
-| **2 — core ablations** | Tier 1 (Table 4.2): context × DALI 2×2 at 5 seeds + flat-encoder and HEIGHT anchors at 3 seeds | H1a/H1b readout with separating CIs on worst-case SR |
+| **2 — core ablations** | Tier 1 (Table 4.2): all 6 cells at 3 seeds, then seed-escalate to 5 only where worst-case-SR CIs overlap the headline (§4.2) | H1a/H1b readout with separating CIs on worst-case SR |
 | **3 — OOD + transfer** | Held-out HSFM evaluation of all Tier-1 checkpoints (H2); frozen-world-model transfer (H4); Tier-2 rows incl. TSSM | H2/H4 readout |
 | **4 — stretch** | Ensemble dynamics heads + conformal KL safety layer (H3); ETH/UCY zero-shot diagnostic | — |
 
@@ -477,7 +521,7 @@ steered generation is worth building.
 | CrowdNav++ [ICRA 2023] | ✓ (policy) | | | | TurtleBot2 |
 | HEIGHT [T-ASE 2026] | ✓ (policy) | | | | TurtleBot2 |
 | DALI [NeurIPS 2025] | | ✓ (physics) | | | DMControl |
-| **This work** | ✓ (world model) | ✓ | ✓ | ✓ | TurtleBot3 (held-out HSFM) |
+| **This work** | ✓ (world model) | ✓ | ✓ | ✓ | Jackal (held-out HSFM + socialgail) |
 
 No existing paper combines all four key dimensions. DreamerNav and Wei Zhu et al. place the world
 model in navigation but omit social structure and OOD evaluation. HEIGHT and CrowdNav++ encode
@@ -511,6 +555,11 @@ derived from real pedestrian-robot interaction data.
   vision-conditioned, adversarial).
 - **Sim-only headline results.** Real-world evidence enters only through the SimDist fine-tuning
   path (§5); the headline claims are sim-to-sim generalization, not sim-to-real performance.
+- **Hand-designed reward.** The reward is a fixed TGRF-derived composite [Kim et al., 2024]
+  using published human-validated term ratios, not searched. Automated reward design (e.g. EvoNav
+  [2026], the current SOTA in evolved social-navigation rewards) is orthogonal to this work's
+  contribution — world-model *structure* — and would compose with it: any reward, learned or
+  hand-set, is consumed by the same b-conditioned imagination. Reward search is left to future work.
 
 ---
 

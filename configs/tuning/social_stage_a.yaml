@@ -18,7 +18,9 @@
 # instead of falling back to in-memory-only, no-cache behavior.
 # agents_dir: /path/to/persistent/tuning_agents
 
-base_config: ../social_csrssm_config.yaml
+# Tuning base = real config pinned at task Stage 2 (see its header: tuning
+# never advances stages, and Stage 0 would mean zero pedestrians all trial).
+base_config: ../social_csrssm_tuning_base.yaml
 
 study_name: social_stage_a
 n_trials: 30

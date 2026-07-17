@@ -255,12 +255,14 @@ def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn, trial_timeout_s=
 
     class _TuningDreamerV3Trainer(DreamerV3Trainer):
         def _setup_curriculum(self) -> None:
-            # Tuning trials must be comparable to each other, so task
-            # difficulty must stay fixed for the whole study — never let
-            # DreamerV3Curriculum advance the obstacle/pedestrian stage,
-            # regardless of whether the base config defines a
-            # curriculum_definition. Equivalent to the already-supported
-            # has_curriculum() == False code path.
+            # ONE-SHOT task setup, then no advancement: run the parent's curriculum
+            # construction so DreamerV3Curriculum.__init__ pushes the starting-stage
+            # params (obstacle counts, task.driver_set, ...) and the tm_* modes to
+            # every env — WITHOUT this the base config's `starting_stage` never
+            # reaches the envs at all during tuning and trials run on task_generator
+            # defaults. Then drop the object so the stage can never advance: tuning
+            # trials must be difficulty-comparable for the whole study.
+            super()._setup_curriculum()
             self._curriculum = None
 
         def _train_impl(self, *args, **kwargs) -> None:

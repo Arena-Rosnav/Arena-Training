@@ -1,0 +1,265 @@
+# cSRSSM SMOKE config w/ pedestrians — tiny networks, 1 env, 400 steps.
+# Fresh-logdir clone of social_csrssm_smoke_peds.yaml (name changed only) to get
+# one clean confirming run without touching the original's accumulated metrics.
+# Success condition: episodes reset with pedestrians visibly spawned, loss values
+# print, context_kl/context_infonce logged nonzero, no shape/import/SE(2)/ped
+# encoder errors.
+
+agent_config:
+  name: social_csrssm_smoke_peds_gatT
+  observations_config: observations/observations.yaml
+
+  framework:
+    name: dreamerv3
+
+    general:
+      logdir: null
+      device: cuda:0
+      log_every: 30          # smoke: flush train metrics early (default 1e4 ~ hours at 1 Hz)
+
+    model:
+      units: 64
+      act: SiLU
+      norm: true
+
+      dyn_stoch: 8
+      dyn_deter: 128
+      dyn_hidden: 64
+      dyn_rec_depth: 1
+      dyn_discrete: 8
+      dyn_mean_act: none
+      dyn_std_act: sigmoid2
+      dyn_min_std: 0.1
+      dyn_scale: 0.5
+
+      encoder:
+        act: SiLU
+        cnn_depth: 8
+        cnn_keys: LaserCartesianMapSpace
+        is_channels_first: true
+        kernel_size: 4
+        minres: 5
+        mlp_keys: DistAngleToGoalSpace|PedestrianNodeSetSpace
+        mlp_layers: 2
+        mlp_units: 64
+        norm: true
+        symlog_inputs: true
+
+      decoder:
+        act: SiLU
+        cnn_depth: 8
+        cnn_keys: LaserCartesianMapSpace
+        cnn_sigmoid: false
+        image_dist: mse
+        is_channels_first: true
+        kernel_size: 4
+        minres: 5
+        mlp_keys: DistAngleToGoalSpace
+        mlp_layers: 2
+        mlp_units: 64
+        norm: true
+        outscale: 1.0
+        vector_dist: symlog_mse
+
+      behavior:
+        discount: 0.997
+        discount_lambda: 0.95
+        imag_horizon: 8
+        imag_gradient: dynamics
+        imag_gradient_mix: 0.0
+        eval_state_mean: false
+
+      actor:
+        dist: normal
+        layers: 2
+        units: 64
+        lr: 3.0e-05
+        entropy: 0.0003
+        grad_clip: 100.0
+        outscale: 1.0
+        std: learned
+        min_std: 0.1
+        max_std: 1.0
+        temp: 0.1
+        unimix_ratio: 0.01
+        eps: 1.0e-05
+
+      critic:
+        dist: symlog_disc
+        layers: 2
+        units: 64
+        lr: 3.0e-05
+        grad_clip: 100.0
+        outscale: 0.0
+        eps: 1.0e-05
+        slow_target: true
+        slow_target_update: 1
+        slow_target_fraction: 0.02
+
+      kl_free: 1.0
+      rep_scale: 0.1
+
+      reward_head:
+        dist: symlog_disc
+        layers: 2
+        outscale: 0.0
+        loss_scale: 1.0
+
+      cont_head:
+        layers: 2
+        outscale: 1.0
+        loss_scale: 1.0
+
+      exploration:
+        extr_scale: 0.0
+        intr_scale: 1.0
+        behavior: greedy
+        until: 0
+        disag_action_cond: false
+        disag_target: stoch
+        disag_log: true
+        disag_models: 10
+        disag_offset: 1
+        disag_layers: 4
+        disag_units: 400
+
+      grad_heads:
+      - decoder
+      - reward
+      - cont
+
+      initial: learned
+      unimix_ratio: 0.01
+      weight_decay: 0.0
+
+      social:
+        enabled: true
+        max_peds: 8
+        node_feat_dim: 5
+        peds_recon_scale: 1.0
+        cell_type: gru
+
+        use_se2_frame_canon: true
+        kinematics_dt: 0.1
+        se2_augment_prob: 0.5
+
+        gat:
+          enabled: true
+          variant: height
+          out_dim: 16
+          heads: 2
+          hidden: 32
+          layers: 1
+          radius_m: 4.0
+          converge_angle_deg: 90.0
+          condition_transition: true   # C1 Option A: c_t also conditions the RSSM transition
+
+        dali:
+          enabled: false
+
+        context:
+          enabled: true
+          b_dim: 8
+          hidden: 16
+          window: 6              # < batch_length=16, matches the validated offline test
+          kl_scale: 1.0
+          pred_scale: 0.1         # primary identifiability: predict next pooled crowd summary beyond window
+          infonce_scale: 0.0      # secondary/ablation-only (false negatives under DR)
+
+        curriculum:
+          enabled: false
+
+    training:
+      steps: 2000
+      batch_size: 4
+      batch_length: 16
+      train_ratio: 4
+      dataset_size: 50
+      prefill_steps: 50
+      pretrain_steps: 10
+      model_lr: 0.0001
+      opt: adam
+      opt_eps: 1.0e-08
+      grad_clip: 1000
+      eval_episode_num: 1
+      eval_every: 1000
+
+  reward:
+    # TGRF-style composite (Kim et al. 2024, Sensors 24(14):4540, arXiv:2402.14569) minus
+    # r_pred (their trajectory-prediction penalty needs a GST predictor; our world model
+    # does prediction implicitly, so we omit it). goal/collision/approach_goal follow
+    # their 10/-10/1.5 ratios; tgrf_discomfort uses their reported w_disc/sigma_disc/d_disc.
+    # proxemic_intrusion/social_potential dropped here to avoid double-counting discomfort
+    # (units remain in the codebase for ablations). RewardEMA percentile-normalizes
+    # imagined returns, so only reward-term *ratios* matter, not absolute magnitudes.
+    # Per-type pairs (ped_type_collision) encode a fixed child=2x adult severity ratio.
+    # Tune anchors, keep ratios.
+    reward_function_dict:
+      goal_reached:
+        reward: 10
+      factored_safe_distance:
+        factor: -0.2
+      collision:
+        reward: -10
+      approach_goal:
+        _potential_based: true
+        factor: 0.15  # TGRF progress:goal ratio (1.5:10)
+        gamma: 0.997
+        _goal_update_threshold: 0.25
+        _follow_subgoal: true
+        _on_safe_dist_violation: true
+      factored_reverse_drive:
+        factor: 0.05
+        threshold: 0.0
+        _on_safe_dist_violation: true
+      two_factor_velocity_difference:
+        alpha: 0.005
+        beta: 0.0
+        _on_safe_dist_violation: true
+      ped_type_collision:
+        type_reward_pairs:
+          0: -2.5
+          1: -5
+      angular_vel_constraint:
+        penalty_factor: -0.01
+        threshold: 0.5
+      tgrf_discomfort:
+        weight: 0.25
+        sigma: 0.2
+        danger_zone_m: 0.5
+
+arena_cfg:
+  general:
+    debug_mode: false
+    goal_radius: 0.4
+    max_num_moves_per_eps: 100
+    n_envs: 1
+    no_gpu: false
+    safety_distance: 1.0
+    control_hz: 10.0
+    verbose: 1
+  logging:
+    default_level: INFO
+    overrides:
+      rosnav_rl.observations: CRITICAL
+      rosnav_rl.model.dreamerv3.helper: INFO
+      rosnav_rl.utils.curriculum: DEBUG
+  task:
+    tm_modules: staged
+    tm_obstacles: random
+    tm_robots: random
+    staged:
+      starting_stage: 0
+      threshold_type: succ
+      upper_threshold: 0.95
+      lower_threshold: 0.3
+      parameter_node_template: /arena/env_{i}/task_generator_node
+      timeout: 5.0
+      curriculum_definition:
+        - task.random.static.n: [2, 4]
+          task.random.interactive.n: [0, 0]
+          task.random.dynamic.n: [1, 3]
+          task.random.static.models: []
+          task.random.interactive.models: []
+          task.random.dynamic.models: []
+          goal_tolerance_radius: 1.2

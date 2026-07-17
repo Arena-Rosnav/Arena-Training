@@ -40,6 +40,17 @@ class CurriculumStage(BaseModel):
     goal_tolerance_radius: Optional[float] = Field(
         default=None, description="Goal tolerance radius"
     )
+    task_driver_set: Optional[str] = Field(
+        default=None,
+        description=(
+            "Comma-separated pedestrian driver set for per-episode domain "
+            "randomization (e.g. 'orca,sfm'). Rides the stage-param push to the "
+            "task_generator node's 'task.driver_set' ROS param; the humansim "
+            "adapter draws one driver per episode from it. None = param untouched "
+            "(single static driver, current behavior)."
+        ),
+        alias="task.driver_set",
+    )
 
 
 class StagedCfg(BaseModel):
