@@ -123,7 +123,40 @@ eval). **Operational sequence + all commands: `RUNBOOK.md` (tuning → tiers →
 
 ## 5. Build-List Summary (ordered)
 
-1. Per-episode driver sampler + de-tuned SFM ParamDist config (training blocker).
+1. Per-episode driver sampler + de-tuned SFM ParamDist config (training blocker). **DONE.**
+   `driver_set: 'orca,sfm'` today; a third entry `sfm_detuned` runs the plain `sfm`
+   physics policy (`agent_msg.policy = "sfm"`) but shifts each spawned agent's
+   per-agent `relaxation_time`/`repulsion_strength`/`repulsion_range` by a fixed
+   offset (~2x SFM's own `ParamDist` std-dev), applied in the task_generator
+   adapter (`task_generator/simulators/human/arena_humansim/arena_humansim.py`,
+   `_SFM_DETUNED_OFFSETS`) after per-agent sampling. Rationale: HSFM's
+   `PARAM_DEFAULTS` inherit these three params unchanged from SFM
+   (`relaxation_time=0.5, repulsion_strength=2.1, repulsion_range=0.3` — see
+   `humansim/arena_humansim/arena_humansim/local_planner/{sfm,hsfm}.py`), so
+   plain `sfm` and HSFM start from identical values on these axes; a held-out
+   HSFM eval gap against plain `sfm` would then partly measure parameter
+   proximity rather than the structural difference (HSFM's lateral/angular
+   force terms, which SFM lacks). De-tuned SFM offsets:
+
+   | param | SFM default (mean, std) | offset | de-tuned mean |
+   |---|---|---|---|
+   | `relaxation_time` | 0.5, 0.05 | +2σ = +0.10 | 0.60 |
+   | `repulsion_strength` | 2.1, 0.2 | −2σ = −0.40 | 1.70 |
+   | `repulsion_range` | 0.3, 0.03 | +2σ = +0.06 | 0.36 |
+
+   `anisotropy` (SFM/HSFM default 0.5, std 0) is left untouched: `AgentState.msg`
+   has no per-agent override field for it (only the three scalars above), and this
+   task treats the `.msg` schema as frozen (ABI-sensitive, out of scope). The
+   `policy_params` JSON field on `AgentStateMsg` was considered as the delivery
+   channel (per the original Task-1 design note) but is not viable as-is: it is
+   consumed only by `SFMPlanner.apply_policy_params` (`kind_gains` schema,
+   `core/agent_manager.py` spawn path), which mutates the planner's **shared**
+   instance rather than per-agent state, and would leak across episodes/agents
+   sharing the same `sfm` policy — offsets instead ride the already-wired
+   per-agent `relaxation_time`/`repulsion_strength`/`repulsion_range` scalar
+   fields on `AgentStateMsg`, which are populated per-episode per-agent with no
+   core-package changes required. Test: `test_sfm_detuned_maps_to_sfm_policy_with_offset_params`
+   in `task_generator/tests/ros/test_humansim_driver_sampler.py`.
 2. Episode-record → parquet pipeline in `arena_evaluation` (all quantitative figures).
 3. Scenario density variants (YAML cloning).
 4. Metrics module: SR/collision/SPL/TTG/NMR/PSVR/d_min/jerk from parquet.
