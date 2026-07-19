@@ -87,10 +87,8 @@ class DreamerV3Curriculum(CurriculumBase):
             timeout=staged_cfg.timeout,
             starting_stage=staged_cfg.starting_stage,
             verbose=verbose,
+            tm_dict=tm_dict,
         )
-
-        if tm_dict:
-            self._queue_episode(tm_dict)
 
     # ── CurriculumBase abstract interface ──────────────────────────────────
 
