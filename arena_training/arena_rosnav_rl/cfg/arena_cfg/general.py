@@ -14,6 +14,8 @@ class GeneralCfg(BaseModel):
         safety_distance (float): Minimum safety distance to be maintained by the agent (considers robot radius). Default is 1.0.
         control_hz (float): Control frequency in Hz for the TimeSyncWrapper. Default is 10.0.
         observations_config (str): Path to the observations YAML config file.
+        lockstep (bool): Gym-exact stepping via sim_lifecycle/step instead of lazy pause. Default is False.
+        lockstep_step_seconds (float): Sim seconds advanced per gym step under lockstep. Default is 0.0999.
     """
 
     debug_mode: bool = False
@@ -24,3 +26,6 @@ class GeneralCfg(BaseModel):
     safety_distance: float = Field(1.0, gt=0)
     verbose: Union[int, bool] = Field(False, title="Verbose Mode")
     control_hz: float = Field(10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
+    lockstep: bool = False
+    # Quantized to physics ticks server-side by sim_lifecycle/step.
+    lockstep_step_seconds: float = Field(0.0999, gt=0)

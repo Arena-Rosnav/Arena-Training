@@ -158,6 +158,14 @@ def sb3_wrap_env(
             else env
         )
 
+    if node is not None:
+        for name, value in (
+            ("lockstep", general_cfg.lockstep),
+            ("lockstep_step_seconds", general_cfg.lockstep_step_seconds),
+        ):
+            if not node.has_parameter(name):
+                node.declare_parameter(name, value)
+
     env = create_env(env_fncs)
     env = apply_vec_stats_recorder(env)
     env = apply_profiling(env)
