@@ -55,13 +55,13 @@ source arena
 
 ```bash
 # Config name resolved from arena_training/configs/
-arena train sim:=gazebo mobile:=rosnav_rl train_config:=dreamer_training_config.yaml
+arena train sim:=gazebo robot.mobile:=rosnav_rl train_config:=dreamer_training_config.yaml
 
 # Or absolute path
-arena train sim:=gazebo mobile:=rosnav_rl train_config:=/path/to/dreamer_training_config.yaml
+arena train sim:=gazebo robot.mobile:=rosnav_rl train_config:=/path/to/dreamer_training_config.yaml
 ```
 
-All launch args (`sim`, `world`, `robot`, `mobile`, `mobile.agent`, …) flow through to `arena_runtime.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). Fleet size is controlled by `arena_cfg.general.n_envs` in the YAML.
+All launch args (`sim`, `world`, `robot`, `robot.mobile`, `robot.mobile.agent`, ...) flow through to `arena_runtime.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). Fleet size is controlled by `arena_cfg.general.n_envs` in the YAML.
 
 `arena train` is sugar for `arena feature training launch ...`. You can visualize the running simulation via `arena viz --all`.
 
@@ -72,7 +72,7 @@ See [`arena_bringup`](../arena_bringup) for all available launch arguments. For 
 If you want to bypass the `arena` CLI (e.g. when running inside an already-set-up environment, or driving from another launch file), invoke the launch file directly:
 
 ```bash
-ros2 launch arena_training training.launch.py sim:=gazebo mobile:=rosnav_rl train_config:=dreamer_training_config.yaml
+ros2 launch arena_training training.launch.py sim:=gazebo robot.mobile:=rosnav_rl train_config:=dreamer_training_config.yaml
 ```
 
 Same arg surface as `arena train` — the CLI verb is just a thin wrapper.

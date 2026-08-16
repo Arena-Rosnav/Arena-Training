@@ -1,7 +1,7 @@
 import launch
 from arena_bringup.actions import IncludeLaunchDescriptionForward
-from arena_bringup.substitutions import LaunchArgument
-from launch.actions import ExecuteProcess
+from arena_bringup.substitutions import LaunchArgument, deprecated_launch_args
+from launch.actions import ExecuteProcess, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
@@ -17,7 +17,7 @@ def generate_launch_description():
     )
 
     LaunchArgument(
-        name='mobile',
+        name='robot.mobile',
         default_value='rosnav_rl',
         description='Mobile adapter for training envs. Override only if train_agent will not be driving cmd_vel.',
     )
@@ -38,7 +38,11 @@ def generate_launch_description():
         on_exit=launch.actions.Shutdown(reason='train_agent exited'),
     )
 
+    def _aliases(context: launch.LaunchContext) -> None:
+        deprecated_launch_args(context)
+
     return launch.LaunchDescription([
+        OpaqueFunction(function=_aliases),
         *ld_items,
         arena_launch,
         train_agent,

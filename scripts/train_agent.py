@@ -293,7 +293,7 @@ def main():
 
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
-        per_env_launch_args = [["train_mode:=true", "auto_reset:=false"] for _ in range(n_envs)]
+        per_env_launch_args = [["robot.train:=true", "task.auto_reset:=false"] for _ in range(n_envs)]
 
         with _stage(f"spawn_envs (n={n_envs})"):
             env_map = spawn_envs(n_envs, per_env_launch_args)
