@@ -16,7 +16,7 @@
 #   • 2 M env-steps target — sufficient to observe convergence on stage 0/1.
 #
 # Run with:
-#   arena train sim:=gazebo local_planner:=rosnav_rl \
+#   arena train sim:=gazebo robot.mobile:=rosnav_rl \
 #         train_config:=dreamer_poc_config.yaml headless:=2
 # =============================================================================
 
