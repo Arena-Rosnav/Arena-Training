@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..cfg.train import TrainingCfg
 
 from .paths import PathDictionary, PathFactory
-from ament_index_python.packages import get_package_share_directory
+import arena_robots.Robot
 
 
 def write_config_yaml(config: dict, path: str) -> None:
@@ -104,12 +104,9 @@ def load_config(file_path: str) -> dict:
     return config
 
 
-def get_robot_yaml_path() -> str:
-    robot_model = "jackal"  # TODO: Fetch robot from parameter server
-    simulation_setup_path = get_package_share_directory("arena_simulation_setup")
-    return os.path.join(
-        simulation_setup_path, "entities", "robots", robot_model, "model_params.yaml"
-    )
+def get_robot_yaml_path(robot_model: str) -> str:
+    robot = arena_robots.Robot.RobotIdentifier(robot_model).resolve_sync()
+    return str(robot.path / "model_params.yaml")
 
 
 def setup_paths_dictionary(
@@ -117,7 +114,9 @@ def setup_paths_dictionary(
 ) -> PathDictionary:
     agents_dir = trainer.config.resolved_agents_dir
     trainer.paths = PathFactory.get_paths(
-        trainer.config.agent_config.name, agents_dir=agents_dir
+        trainer.config.agent_config.name,
+        trainer.config.arena_cfg.robot.robot_model,
+        agents_dir=agents_dir,
     )
     if not is_debug_mode:
         trainer.paths.create_all()

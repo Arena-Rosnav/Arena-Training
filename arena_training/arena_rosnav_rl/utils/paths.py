@@ -1,4 +1,3 @@
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
@@ -6,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Optional, Type
 
 from ament_index_python.packages import get_package_share_directory
+
+import arena_robots.Robot
 
 # Resolve path back through symlinks to the actual source tree so agent
 # artifacts are always written to Arena/arena_training/agents, not the
@@ -32,8 +33,6 @@ __all__ = [
 class RosPackages:
     """Centralized ROS package paths"""
 
-    # TODO: Consider using a more dynamic approach to fetch package paths
-    SIMULATION_SETUP: Path = Path(get_package_share_directory("arena_simulation_setup"))
     ARENA_TRAINING: Path = _ARENA_TRAINING_ROOT  # source tree root, not install
 
 
@@ -134,20 +133,13 @@ class RewardFunction(ConfigComponent):
 class RobotSetting(PathComponent):
     """Robot setting paths"""
 
-    def __init__(self, robot_model: Optional[str] = None):
-        # TODO: Consider fetching the default robot model from ROS parameters
-        self.robot_model = (
-            robot_model or "jackal"
-        )  # Default to 'jackal' if not specified
+    def __init__(self, robot_model: str):
+        self.robot_model = robot_model
 
     @cached_property
     def path(self) -> Path:
-        return (
-            RosPackages.SIMULATION_SETUP
-            / "robot"
-            / self.robot_model
-            / f"{self.robot_model}.model.yaml"
-        )
+        robot = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync()
+        return robot.path / "model_params.yaml"
 
 
 class PathDictionary(dict):
@@ -164,12 +156,14 @@ class PathFactory:
     @staticmethod
     def get_paths(
         agent_name: str,
+        robot_model: str,
         agents_dir: Optional[Path] = None,
     ) -> Dict[Type[PathComponent], PathComponent]:
         """Generate all required paths for the agent.
 
         Args:
             agent_name: Name of the agent.
+            robot_model: Robot identifier resolved through arena_robots.
             agents_dir: Custom base directory for agent artifacts.
                         If *None*, falls back to ``_ARENA_TRAINING_ROOT / "agents"``.
         """
@@ -178,7 +172,7 @@ class PathFactory:
                 Agent: Agent(agent_name, agents_dir=agents_dir),
                 AgentTensorboard: AgentTensorboard(agent_name, agents_dir=agents_dir),
                 AgentEval: AgentEval(agent_name, agents_dir=agents_dir),
-                RobotSetting: RobotSetting(),
+                RobotSetting: RobotSetting(robot_model),
                 ConfigComponent: ConfigComponent(),
             }
         )
