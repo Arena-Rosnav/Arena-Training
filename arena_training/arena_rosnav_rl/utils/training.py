@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from ..cfg.train import TrainingCfg
 
 from .paths import PathDictionary, PathFactory
-import arena_robots.Robot
 
 
 def write_config_yaml(config: dict, path: str) -> None:
@@ -102,11 +101,6 @@ def load_config(file_path: str) -> dict:
     with open(file_path, "r", encoding="utf-8") as target:
         config = yaml.load(target, Loader=yaml.FullLoader)
     return config
-
-
-def get_robot_yaml_path(robot_model: str) -> str:
-    robot = arena_robots.Robot.RobotIdentifier(robot_model).resolve_sync()
-    return str(robot.path / "model_params.yaml")
 
 
 def setup_paths_dictionary(
