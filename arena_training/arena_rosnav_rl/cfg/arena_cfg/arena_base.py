@@ -1,7 +1,5 @@
-from typing import Optional
-
-from pydantic import BaseModel, field_validator
-from rosnav_rl.cfg.logging import LoggingCfg 
+from pydantic import BaseModel, ValidationInfo, field_validator
+from rosnav_rl.cfg.logging import LoggingCfg
 
 from .general import GeneralCfg
 from .monitor import MonitoringCfg
@@ -11,12 +9,12 @@ from .task import TaskCfg
 
 
 class ArenaBaseCfg(BaseModel):
-    general: Optional[GeneralCfg] = GeneralCfg()
-    logging: Optional[LoggingCfg] = LoggingCfg()
-    monitoring: Optional[MonitoringCfg] = MonitoringCfg()
-    task: Optional[TaskCfg] = TaskCfg()
-    profiling: Optional[ProfilingCfg] = None
-    robot: Optional[RobotCfg] = RobotCfg()
+    general: GeneralCfg | None = GeneralCfg()
+    logging: LoggingCfg | None = LoggingCfg()
+    monitoring: MonitoringCfg | None = MonitoringCfg()
+    task: TaskCfg | None = TaskCfg()
+    profiling: ProfilingCfg | None = None
+    robot: RobotCfg | None = RobotCfg()
 
     @field_validator(
         "general",
@@ -26,7 +24,11 @@ class ArenaBaseCfg(BaseModel):
         mode="after",
     )
     @classmethod
-    def check_attr_none(cls, v, values):
+    def check_attr_none(
+        cls,
+        v: GeneralCfg | MonitoringCfg | TaskCfg | RobotCfg | None,
+        values: ValidationInfo,
+    ) -> GeneralCfg | MonitoringCfg | TaskCfg | RobotCfg:
         if v is None:
             raise ValueError(f"{v} cannot be None")
         return v

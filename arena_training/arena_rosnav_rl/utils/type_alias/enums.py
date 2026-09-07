@@ -1,5 +1,5 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class RLFramework(str, Enum):
+class RLFramework(StrEnum):
     SB3 = "stable_baselines3"

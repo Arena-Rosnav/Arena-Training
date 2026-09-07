@@ -2,18 +2,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Type
-
-from ament_index_python.packages import get_package_share_directory
 
 import arena_robots.Robot
+from ament_index_python.packages import get_package_share_directory
 
 # Resolve path back through symlinks to the actual source tree so agent
 # artifacts are always written to Arena/arena_training/agents, not the
 # install tree or a site-packages location.
-_ARENA_TRAINING_ROOT = Path(__file__).resolve().parents[3]  # …/Arena/arena_training
+_ARENA_TRAINING_ROOT = Path(__file__).resolve().parents[3]  # .../Arena/arena_training
 
-# import rospy
 
 __all__ = [
     "PathComponent",
@@ -58,7 +55,7 @@ class PathComponent(ABC):
 class AgentComponent(PathComponent):
     """Base class for agent-related paths"""
 
-    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
+    def __init__(self, agent_name: str, agents_dir: Path | None = None):
         self.agent_name = agent_name
         self._base = (agents_dir or _ARENA_TRAINING_ROOT / "agents") / agent_name
 
@@ -74,7 +71,7 @@ class Agent(AgentComponent):
 class AgentLogs(AgentComponent):
     """Base class for agent log paths"""
 
-    def __init__(self, agent_name: str, log_type: str, agents_dir: Optional[Path] = None):
+    def __init__(self, agent_name: str, log_type: str, agents_dir: Path | None = None):
         super().__init__(agent_name, agents_dir=agents_dir)
         self.log_type = log_type
 
@@ -86,14 +83,14 @@ class AgentLogs(AgentComponent):
 class AgentTensorboard(AgentLogs):
     """Agent tensorboard logs"""
 
-    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
+    def __init__(self, agent_name: str, agents_dir: Path | None = None):
         super().__init__(agent_name, "training", agents_dir=agents_dir)
 
 
 class AgentEval(AgentLogs):
     """Agent evaluation logs"""
 
-    def __init__(self, agent_name: str, agents_dir: Optional[Path] = None):
+    def __init__(self, agent_name: str, agents_dir: Path | None = None):
         super().__init__(agent_name, "eval", agents_dir=agents_dir)
 
 
@@ -122,11 +119,7 @@ class RewardFunction(ConfigComponent):
 
     @cached_property
     def path(self) -> Path:
-        file_name = (
-            f"{self.file_name}.yaml"
-            if not self.file_name.endswith(".yaml")
-            else self.file_name
-        )
+        file_name = f"{self.file_name}.yaml" if not self.file_name.endswith(".yaml") else self.file_name
         return self._base / "reward_functions" / file_name
 
 
@@ -157,8 +150,8 @@ class PathFactory:
     def get_paths(
         agent_name: str,
         robot_model: str,
-        agents_dir: Optional[Path] = None,
-    ) -> Dict[Type[PathComponent], PathComponent]:
+        agents_dir: Path | None = None,
+    ) -> dict[type[PathComponent], PathComponent]:
         """Generate all required paths for the agent.
 
         Args:

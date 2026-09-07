@@ -1,4 +1,6 @@
-"""Trainer setup helpers — path management, config serialization, display."""
+"""Trainer setup helpers, path management, config serialization, display."""
+
+from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
@@ -10,8 +12,10 @@ from pygments.formatters import TerminalFormatter
 from pygments.lexers import get_lexer_by_name
 
 if TYPE_CHECKING:
-    from ..trainer.arena_trainer import ArenaTrainer
+    from ruamel.yaml.comments import CommentedMap
+
     from ..cfg.train import TrainingCfg
+    from ..trainer.arena_trainer import ArenaTrainer
 
 from .paths import PathDictionary, PathFactory
 
@@ -21,7 +25,7 @@ def write_config_yaml(config: dict, path: str) -> None:
         yaml.dump(config, outfile, default_flow_style=False)
 
 
-def build_training_commented_map(cfg: "TrainingCfg"):
+def build_training_commented_map(cfg: TrainingCfg) -> CommentedMap:
     """Build a structured ruamel.yaml CommentedMap for the full training config."""
     from ruamel.yaml.comments import CommentedMap
 
@@ -31,7 +35,7 @@ def build_training_commented_map(cfg: "TrainingCfg"):
     root["agent_config"] = cfg.agent_config._to_commented_map()
     root.yaml_set_comment_before_after_key("agent_config", before="Agent configuration")
 
-    # agents_dir (usually null — keep it visible)
+    # agents_dir (usually null, keep it visible)
     root["agents_dir"] = str(cfg.agents_dir) if cfg.agents_dir is not None else None
 
     # Arena / simulation
@@ -56,9 +60,7 @@ def print_dict(hyperparams: dict) -> None:
 def print_base_model(hyperparams: BaseModel) -> None:
     print("\n--------------------------------")
     print("         HYPERPARAMETERS         \n")
-    yaml_str = yaml.dump(
-        hyperparams.model_dump(), default_flow_style=False, sort_keys=False
-    )
+    yaml_str = yaml.dump(hyperparams.model_dump(), default_flow_style=False, sort_keys=False)
     colorful_yaml = highlight(yaml_str, get_lexer_by_name("yaml"), TerminalFormatter())
     print(colorful_yaml)
     print("--------------------------------\n\n")
@@ -98,14 +100,12 @@ def create_tensorboard_directory(paths: dict, use_wandb: bool) -> str:
 
 def load_config(file_path: str) -> dict:
     """Load config parameters from config file."""
-    with open(file_path, "r", encoding="utf-8") as target:
+    with open(file_path, encoding="utf-8") as target:
         config = yaml.load(target, Loader=yaml.FullLoader)
     return config
 
 
-def setup_paths_dictionary(
-    trainer: "ArenaTrainer", is_debug_mode: bool = False
-) -> PathDictionary:
+def setup_paths_dictionary(trainer: ArenaTrainer, is_debug_mode: bool = False) -> PathDictionary:
     agents_dir = trainer.config.resolved_agents_dir
     trainer.paths = PathFactory.get_paths(
         trainer.config.agent_config.name,

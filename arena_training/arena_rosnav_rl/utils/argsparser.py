@@ -1,11 +1,10 @@
 """Argument parsing for arena_training scripts."""
 
 import argparse
-import os
-import numpy as np
+from collections.abc import Callable
 
 
-def new_training_args(parser):
+def new_training_args(parser: argparse.ArgumentParser):
     """Program arguments for the training script."""
     parser.add_argument(
         "--config",
@@ -22,12 +21,20 @@ def new_training_args(parser):
     )
 
 
-def parse_training_args(args=None, ignore_unknown=True):
+def parse_training_args(
+    args: list[str] | None = None,
+    ignore_unknown: bool = True,
+) -> tuple[argparse.Namespace, list[str]]:
     """Parser for the training script."""
     return parse_various_args(args, [new_training_args], [], ignore_unknown)
 
 
-def parse_various_args(args, arg_populate_funcs, arg_check_funcs, ignore_unknown):
+def parse_various_args(
+    args: list[str] | None,
+    arg_populate_funcs: list[Callable[[argparse.ArgumentParser], None]],
+    arg_check_funcs: list[Callable[[argparse.Namespace], None]],
+    ignore_unknown: bool,
+) -> tuple[argparse.Namespace, list[str]]:
     """Generic arg parsing function."""
     parser = argparse.ArgumentParser()
 
@@ -47,9 +54,9 @@ def parse_various_args(args, arg_populate_funcs, arg_check_funcs, ignore_unknown
     return parsed_args, unknown_args
 
 
-def print_args(args):
+def print_args(args: argparse.Namespace):
     print("\n-------------------------------")
     print("            ARGUMENTS          ")
     for k in args.__dict__:
-        print("- {} : {}".format(k, args.__dict__[k]))
+        print(f"- {k} : {args.__dict__[k]}")
     print("--------------------------------\n")

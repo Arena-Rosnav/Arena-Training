@@ -1,5 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Union
+from pydantic import BaseModel, Field
 
 
 class GeneralCfg(BaseModel):
@@ -24,7 +23,7 @@ class GeneralCfg(BaseModel):
     max_num_moves_per_eps: int = Field(150, ge=1)
     goal_radius: float = Field(0.4, title="Goal Radius", gt=0)
     safety_distance: float = Field(1.0, gt=0)
-    verbose: Union[int, bool] = Field(False, title="Verbose Mode")
+    verbose: int | bool = Field(False, title="Verbose Mode")
     control_hz: float = Field(10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
     lockstep: bool = False
     # Quantized to physics ticks server-side by sim_lifecycle/step.

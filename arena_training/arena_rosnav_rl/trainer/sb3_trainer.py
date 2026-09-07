@@ -5,10 +5,10 @@ from functools import partial
 
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
-from ..cfg import sb3_cfg as arena_cfg
-from ..utils import paths as Paths
 from ...environments.wrappers import TimeSyncWrapper
+from ..cfg import sb3_cfg as arena_cfg
 from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
+from ..utils import paths as Paths
 from ..utils.env_factory import make_envs, sb3_wrap_env
 from ..utils.monitoring import setup_wandb
 from .arena_trainer import (
@@ -86,7 +86,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         The hooks are executed at specific stages during the training process.
         """
 
-        def _transfer_weights(_):
+        def _transfer_weights(_: ArenaTrainer | None):
             transfer_cfg = self.config.agent_config.framework.algorithm.transfer_weights
             if transfer_cfg:
                 self.agent.model.transfer_weights(
@@ -143,13 +143,14 @@ class StableBaselines3Trainer(ArenaTrainer):
         self._complete_model_initialization(self.environment.train_env)
         _init_log.debug("_complete_model_initialization done in %.1fs", time.monotonic() - t0)
 
-    def _configure_verbose(self, verbose) -> None:
+    def _configure_verbose(self, verbose: int | bool) -> None:
         """Apply log levels for rosnav_rl namespaces and this trainer."""
-        from ..utils.log_utils import configure_trainer_logging
         import logging as _logging
 
+        from ..utils.log_utils import configure_trainer_logging
+
         configure_trainer_logging(
-            logging_cfg=getattr(self.config.arena_cfg, "logging", None),
+            logging_cfg=self.config.arena_cfg.logging,
             verbose=int(verbose),
             trainer_logger=_logging.getLogger(__name__),
         )
@@ -216,12 +217,7 @@ class StableBaselines3Trainer(ArenaTrainer):
 
     def _setup_monitoring(self) -> None:
         """Set up monitoring tools if not in debug mode."""
-        if (
-            not self.config.arena_cfg.general.debug_mode
-            and self.config.arena_cfg.monitoring is not None
-            and self.config.arena_cfg.monitoring.wandb is not None
-            and self.config.arena_cfg.monitoring.wandb.enabled
-        ):
+        if not self.config.arena_cfg.general.debug_mode and self.config.arena_cfg.monitoring is not None and self.config.arena_cfg.monitoring.wandb is not None and self.config.arena_cfg.monitoring.wandb.enabled:
             setup_wandb(
                 run_name=self.config.agent_config.name,
                 group=self.config.agent_config.framework.algorithm.architecture_name,
@@ -230,7 +226,7 @@ class StableBaselines3Trainer(ArenaTrainer):
                 agent_id=self.config.agent_config.name,
             )
 
-    def _train_impl(self, *args, **kwargs) -> None:
+    def _train_impl(self, *args: object, **kwargs: object) -> None:
         """Implementation of training logic."""
         self.agent.train(
             total_timesteps=self.config.agent_config.framework.algorithm.parameters.total_timesteps,
@@ -256,17 +252,8 @@ class StableBaselines3Trainer(ArenaTrainer):
             - After initialization, the training environment is attached to the model.
         """
 
-        tensorboard_log_path = (
-            self.paths[Paths.AgentTensorboard].path
-            if not self.config.arena_cfg.general.debug_mode
-            else None
-        )
-        checkpoint_path = (
-            None
-            if not self.is_resume
-            else self.paths[Paths.Agent].path
-            / self.config.agent_config.framework.algorithm.checkpoint
-        )
+        tensorboard_log_path = self.paths[Paths.AgentTensorboard].path if not self.config.arena_cfg.general.debug_mode else None
+        checkpoint_path = None if not self.is_resume else self.paths[Paths.Agent].path / self.config.agent_config.framework.algorithm.checkpoint
 
         self.agent.initialize_model(
             env=train_env,
@@ -275,5 +262,3 @@ class StableBaselines3Trainer(ArenaTrainer):
             checkpoint_path=checkpoint_path,
         )
         self.agent.model.environment = train_env
-
-

@@ -1,27 +1,31 @@
+from __future__ import annotations
+
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Type
-
-import rosnav_rl
-import arena_training.arena_rosnav_rl.cfg as arena_cfg
+from typing import TYPE_CHECKING
 
 from rosnav_rl.rl_agent import RL_Agent
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
 
+import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
 from ..node import SupervisorNode
+from ..utils import paths as Paths
+from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.training import (
     print_base_model,
     setup_paths_dictionary,
 )
-from ..utils import paths as Paths
-from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
 
+if TYPE_CHECKING:
+    from rclpy.parameter import Parameter
+
 _init_log = logging.getLogger("arena_training.init")
+
 
 @dataclass
 class TrainingArguments:
@@ -62,7 +66,7 @@ class ArenaTrainer(ABC):
     """
 
     _framework: SupportedRLFrameworks
-    _config_type: Type[arena_cfg.ArenaBaseCfg]
+    _config_type: type[arena_cfg.ArenaBaseCfg]
 
     config: arena_cfg.TrainingCfg
     paths: PathsDict
@@ -100,10 +104,7 @@ class ArenaTrainer(ABC):
 
     def _validate_config(self, config: arena_cfg.TrainingCfg) -> None:
         if not isinstance(config.arena_cfg, self._config_type):
-            raise TypeError(
-                f"Invalid configuration type: {type(config.arena_cfg)} for {self._framework}. "
-                f"Expected one of: {self._config_type}"
-            )
+            raise TypeError(f"Invalid configuration type: {type(config.arena_cfg)} for {self._framework}. Expected one of: {self._config_type}")
 
     def _setup_supervisor_node(self):
         self._supervisor_node = SupervisorNode(node_name="Arena_Trainer")
@@ -145,7 +146,7 @@ class ArenaTrainer(ABC):
         before_stage=TrainingHookStages.BEFORE_TRAINING,
         after_stage=TrainingHookStages.AFTER_TRAINING,
     )
-    def train(self, *args, **kwargs) -> None:
+    def train(self, *args: object, **kwargs: object) -> None:
         """
         Execute the training process for the reinforcement learning agent.
 
@@ -161,7 +162,7 @@ class ArenaTrainer(ABC):
         """
         self._train_impl()
 
-    def save(self, checkpoint: str, *args, **kwargs) -> None:
+    def save(self, checkpoint: str, *args: object, **kwargs: object) -> None:
         """
         Save the model checkpoint.
         This method saves the model to the specified checkpoint path.
@@ -203,28 +204,24 @@ class ArenaTrainer(ABC):
     def _write_config(self):
         """Write configuration to file if not in debug mode."""
         if not self.is_debug_mode:
-            self.config.to_yaml(
-                self.paths[Paths.Agent].path / "training_config.yaml"
-            )
+            self.config.to_yaml(self.paths[Paths.Agent].path / "training_config.yaml")
 
     @bind_hooks(before_stage=TrainingHookStages.ON_SAVE)
     def _save_model(self, checkpoint: str) -> None:
         """Save the trained model."""
         if not self.is_debug_mode:
-            self.agent.model.save(
-                dirpath=self.paths[Paths.Agent].path, file_name=checkpoint
-            )
+            self.agent.model.save(dirpath=self.paths[Paths.Agent].path, file_name=checkpoint)
 
-    def _register_framework_specific_hooks(self):
+    @abstractmethod
+    def _register_framework_specific_hooks(self) -> None:
         """Register hooks that are specific to the framework."""
-        pass
 
-    def _train_impl(self, *args, **kwargs) -> None:
+    def _train_impl(self, *args: object, **kwargs: object) -> None:
         """Implementation of training logic."""
         self.agent.model.train()
         self._save_model(checkpoint="last_model")
 
-    def _setup_agent_parameters(self, *args, **kwargs) -> None:
+    def _setup_agent_parameters(self, *args: object, **kwargs: object) -> None:
         """Store the fully-populated AgentParameters on the trainer."""
         self.agent_parameters = self.config.agent_config.parameters
 
@@ -265,12 +262,8 @@ class ArenaTrainer(ABC):
         # resolve it immediately using the robot's built-in discrete action list.
         discretization_cfg = self.config.agent_config.discretization
         if discretization_cfg is not None:
-            action_space = action_space.model_copy(
-                update={"discretization": discretization_cfg}
-            )
-            action_space = action_space.resolve_discretization(
-                robot_discrete_actions=robot_desc.actions.discrete
-            )
+            action_space = action_space.model_copy(update={"discretization": discretization_cfg})
+            action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete)
 
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,
@@ -302,26 +295,26 @@ class ArenaTrainer(ABC):
         )
 
     @abstractmethod
-    def _setup_agent(self, *args, **kwargs) -> None:
+    def _setup_agent(self, *args: object, **kwargs: object) -> None:
         """Initialize the RL agent."""
         raise NotImplementedError()
 
     @abstractmethod
-    def _setup_environment(self, *args, **kwargs) -> None:
+    def _setup_environment(self, *args: object, **kwargs: object) -> None:
         """Setup training Gym environment."""
         raise NotImplementedError()
 
     @abstractmethod
-    def _setup_monitoring(self, *args, **kwargs) -> None:
+    def _setup_monitoring(self, *args: object, **kwargs: object) -> None:
         """Setup monitoring tools."""
         raise NotImplementedError()
 
     @property
-    def is_debug_mode(self):
+    def is_debug_mode(self) -> Parameter:
         return self.node.get_parameter_or("debug_mode", False)
 
     @property
-    def is_resume(self):
+    def is_resume(self) -> bool:
         return self.__resume
 
     @property

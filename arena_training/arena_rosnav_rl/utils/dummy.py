@@ -1,6 +1,15 @@
-def get_dummy_dreamer_cfg():
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..cfg import TrainingCfg
+
+
+def get_dummy_dreamer_cfg() -> TrainingCfg:
     import rosnav_rl
     import rosnav_rl.model.dreamerv3.cfg as dreamerv3_cfg
+
     from .. import cfg as arena_cfg
 
     return arena_cfg.TrainingCfg(
@@ -33,15 +42,14 @@ def get_dummy_dreamer_cfg():
     )
 
 
-def get_dummy_sb3_cfg():
-    from .. import cfg as arena_cfg
+def get_dummy_sb3_cfg() -> TrainingCfg:
     import rosnav_rl
     import rosnav_rl.model.stable_baselines3.cfg as sb3_cfg
 
+    from .. import cfg as arena_cfg
+
     sb3 = sb3_cfg.StableBaselinesCfg(
-        algorithm=sb3_cfg.PPO_Cfg(
-            architecture_name="AGENT_1", parameters=sb3_cfg.PPO_Algorithm_Cfg()
-        ),
+        algorithm=sb3_cfg.PPO_Cfg(architecture_name="AGENT_1", parameters=sb3_cfg.PPO_Algorithm_Cfg()),
         architecture_name="AGENT_1",
     )
 

@@ -6,6 +6,4 @@ from .callbacks import ArenaCallbacksCfg
 
 # Stable Baselines 3 Pipeline Configuration
 class ArenaSB3Cfg(ArenaBaseCfg):
-    callbacks: ArenaCallbacksCfg = Field(
-        default_factory=ArenaCallbacksCfg, exclude=None
-    )
+    callbacks: ArenaCallbacksCfg = Field(default_factory=ArenaCallbacksCfg, exclude=None)

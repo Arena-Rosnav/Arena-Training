@@ -26,7 +26,7 @@ class SharedEnvEvalCallback(RosnavEvalCallback):
         All other arguments are forwarded to :class:`RosnavEvalCallback`.
     """
 
-    def __init__(self, train_max_steps: int, eval_max_steps: int, **kwargs):
+    def __init__(self, train_max_steps: int, eval_max_steps: int, **kwargs: object):
         super().__init__(**kwargs)
         self._train_max_steps = train_max_steps
         self._eval_max_steps = eval_max_steps

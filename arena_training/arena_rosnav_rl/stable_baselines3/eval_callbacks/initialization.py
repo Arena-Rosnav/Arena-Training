@@ -1,13 +1,14 @@
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
-from ...node import SupervisorNode
-from ...cfg.arena_cfg.task import TaskCfg
 from rosnav_rl.utils.stable_baselines3.callbacks import (
     StopTrainingOnRewardThreshold,
     StopTrainingOnSuccessThreshold,
 )
 from rosnav_rl.utils.stable_baselines3.staged_train_callback import StagedTrainCallback
 from stable_baselines3.common.vec_env import VecEnv
+
+from ...cfg.arena_cfg.task import TaskCfg
+from ...node import SupervisorNode
 from .shared_env_eval_callback import SharedEnvEvalCallback
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ def _create_stop_training_callbacks(
     threshold_type: str,
     threshold: float,
     verbose: int = 1,
-) -> List:
+) -> list:
     """Create stop training callbacks with direct parameters.
 
     Args:
@@ -47,14 +48,14 @@ def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
     n_envs: int,
-    tm_modules: List[str],
+    tm_modules: list[str],
     model_save_path: str,
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
     debug_mode: bool,
     train_max_steps: int,
     eval_max_steps: int,
-    task_cfg: Optional[TaskCfg] = None,
+    task_cfg: TaskCfg | None = None,
 ) -> SharedEnvEvalCallback:
     """
     Initialize Stable Baselines3 (SB3) callbacks for training and evaluation.
@@ -80,12 +81,7 @@ def init_sb3_callbacks(
     callbacks = []
 
     # Add curriculum callback if staging is enabled
-    if (
-        "staged" in tm_modules
-        and task_cfg
-        and task_cfg.staged
-        and task_cfg.staged.curriculum_definition
-    ):
+    if "staged" in tm_modules and task_cfg and task_cfg.staged and task_cfg.staged.curriculum_definition:
         curriculum_stages = {}
         for stage in task_cfg.staged.curriculum_definition:
             stage_dict = stage.model_dump(by_alias=True, exclude_none=True)
@@ -105,11 +101,13 @@ def init_sb3_callbacks(
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
             )
-            curriculum_cb._queue_episode({
-                "tm_robots": task_cfg.tm_robots,
-                "tm_obstacles": task_cfg.tm_obstacles,
-                "tm_modules": task_cfg.tm_modules,
-            })
+            curriculum_cb._queue_episode(
+                {
+                    "tm_robots": task_cfg.tm_robots,
+                    "tm_obstacles": task_cfg.tm_obstacles,
+                    "tm_modules": task_cfg.tm_modules,
+                }
+            )
             callbacks.append(curriculum_cb)
 
     # Add stop training callbacks
@@ -122,19 +120,11 @@ def init_sb3_callbacks(
         callbacks.extend(stop_callbacks)
 
     # Get curriculum callback for eval callback integration
-    curriculum_cb = next(
-        (cb for cb in callbacks if isinstance(cb, StagedTrainCallback)), None
-    )
+    curriculum_cb = next((cb for cb in callbacks if isinstance(cb, StagedTrainCallback)), None)
 
     # Get stop training callback for eval callback integration
     stop_cb = next(
-        (
-            cb
-            for cb in callbacks
-            if isinstance(
-                cb, (StopTrainingOnRewardThreshold, StopTrainingOnSuccessThreshold)
-            )
-        ),
+        (cb for cb in callbacks if isinstance(cb, (StopTrainingOnRewardThreshold, StopTrainingOnSuccessThreshold))),
         None,
     )
 

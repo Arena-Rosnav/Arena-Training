@@ -1,9 +1,6 @@
-from typing import Optional
-
-from pydantic import BaseModel, ConfigDict, Field
-
 import arena_robots.Robot
 from arena_robots.caps import MobileSpec
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RobotCfg(BaseModel):
@@ -15,18 +12,15 @@ class RobotCfg(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
-    robot_description: Optional[MobileSpec] = Field(
+    robot_description: MobileSpec | None = Field(
         None,
         alias="Robot Yaml Description",
         exclude=True,
     )
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context: object, /) -> None:
         if self.robot_description is None:
             mobile = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync().mobile
             if mobile is None:
-                raise ValueError(
-                    f"robot '{self.robot_model}' does not advertise a 'mobile' cap — "
-                    f"RobotCfg requires caps/mobile.yaml"
-                )
+                raise ValueError(f"robot '{self.robot_model}' does not advertise a 'mobile' cap, RobotCfg requires caps/mobile.yaml")
             object.__setattr__(self, "robot_description", mobile)

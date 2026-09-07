@@ -1,12 +1,10 @@
 import time
 
 import numpy as np
+import wandb
 from rosnav_rl.observations import DONE_REASONS
 from stable_baselines3.common.vec_env import VecEnv, VecEnvWrapper
-from stable_baselines3.common.vec_env.base_vec_env import VecEnvObs
-
-# import rospy
-import wandb
+from stable_baselines3.common.vec_env.base_vec_env import VecEnvObs, VecEnvStepReturn
 
 
 class VecStatsRecorder(VecEnvWrapper):
@@ -22,10 +20,10 @@ class VecStatsRecorder(VecEnvWrapper):
         self,
         venv: VecEnv,
         after_x_eps: int = 100,
-        *args,
-        **kwargs,
+        *args: object,
+        **kwargs: object,
     ):
-        super(VecStatsRecorder, self).__init__(venv)
+        super().__init__(venv)
 
         assert after_x_eps > 0, "'after_x_eps' must be positive"
 
@@ -51,7 +49,7 @@ class VecStatsRecorder(VecEnvWrapper):
         self.episode_lengths = []
         self.done_reasons = {done_reason.name: 0 for done_reason in DONE_REASONS}
 
-    def step_wait(self):
+    def step_wait(self) -> VecEnvStepReturn:
         """
         Perform a step in the wrapped environment and record the statistics.
 
@@ -108,18 +106,9 @@ class VecStatsRecorder(VecEnvWrapper):
                     "train_episode/step_time": avg_step_time,
                     "train_episode/reward": avg_episode_return,
                     "train_episode/length": avg_episode_length,
-                    "train_episode/success_rate": self.done_reasons[
-                        DONE_REASONS.SUCCESS.name
-                    ]
-                    / len(self.episode_lengths),
-                    "train_episode/collision_rate": self.done_reasons[
-                        DONE_REASONS.COLLISION.name
-                    ]
-                    / len(self.episode_lengths),
-                    "train_episode/timeout_rate": self.done_reasons[
-                        DONE_REASONS.STEP_LIMIT.name
-                    ]
-                    / len(self.episode_lengths),
+                    "train_episode/success_rate": self.done_reasons[DONE_REASONS.SUCCESS.name] / len(self.episode_lengths),
+                    "train_episode/collision_rate": self.done_reasons[DONE_REASONS.COLLISION.name] / len(self.episode_lengths),
+                    "train_episode/timeout_rate": self.done_reasons[DONE_REASONS.STEP_LIMIT.name] / len(self.episode_lengths),
                 }
             )
 

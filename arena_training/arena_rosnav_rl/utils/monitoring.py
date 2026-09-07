@@ -1,21 +1,9 @@
 """Monitoring / experiment-tracking helpers (Weights & Biases)."""
 
-import re
-from typing import List, TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING
 
 import torch
-import logging
-
-
-from sb3_contrib import RecurrentPPO
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import (
-    EvalCallback,
-    StopTrainingOnRewardThreshold,
-)
-from stable_baselines3.common.utils import configure_logger, constant_fn
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-
 import wandb
 
 if TYPE_CHECKING:
@@ -27,7 +15,7 @@ def setup_wandb(
     group: str = None,
     config: "TrainingCfg" = None,
     agent_id: str = None,
-    to_watch: List[torch.nn.Module] = [],
+    to_watch: list[torch.nn.Module] | None = None,
 ) -> None:
     """Set up Weights and Biases (wandb) for training tracking."""
     logger = logging.getLogger(__name__)
@@ -45,7 +33,7 @@ def setup_wandb(
             config=config.model_dump(),
             id=agent_id,
         )
-        for module in to_watch:
+        for module in to_watch or ():
             wandb.watch(module, log_graph=True)
     except Exception as e:
         logger.warning(f"[W&B] Failed to initialize (no network?): {e}. Continuing without W&B.")

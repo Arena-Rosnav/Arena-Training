@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 from geometry_msgs.msg import Twist
 from rosnav_rl.observations import DONE_REASONS
@@ -10,7 +8,7 @@ def determine_termination(
     curr_steps: int,
     max_steps: int,
     info: dict = None,
-) -> Tuple[dict, bool]:
+) -> tuple[dict, bool]:
     """
     Determine if the episode should terminate.
 

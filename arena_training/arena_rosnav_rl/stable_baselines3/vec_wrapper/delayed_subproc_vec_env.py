@@ -1,8 +1,8 @@
 import logging
 import multiprocessing as mp
-import warnings
 import time
-from typing import Any, Callable, Dict, List, Optional
+import warnings
+from typing import Any, Callable
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -19,10 +19,10 @@ def _worker(
     env_fn_wrapper: CloudpickleWrapper,
     worker_idx: int = -1,
 ) -> None:
-    # Import here to avoid a circular import
-    from stable_baselines3.common.env_util import is_wrapped
     import os
+
     import rclpy
+    from stable_baselines3.common.env_util import is_wrapped
 
     # Worker inherits parent stdio but not logging config, so configure here.
     logging.basicConfig(
@@ -43,7 +43,7 @@ def _worker(
 
     env = _patch_env(env_fn_wrapper.var())
     _init_log.info(f"{_tag} env constructed, awaiting commands")
-    reset_info: Optional[Dict[str, Any]] = {}
+    reset_info: dict[str, Any] | None = {}
     while True:
         try:
             cmd, data = remote.recv()
@@ -81,9 +81,7 @@ def _worker(
             elif cmd == "init":
                 t0 = time.monotonic()
                 result = env._initialize_environment()
-                _init_log.info(
-                    f"{_tag} init done in {time.monotonic() - t0:.1f}s"
-                )
+                _init_log.info(f"{_tag} init done in {time.monotonic() - t0:.1f}s")
                 remote.send(result)
             else:
                 raise NotImplementedError(f"`{cmd}` is not implemented in the worker")
@@ -92,11 +90,11 @@ def _worker(
         except Exception as _e:
             # Surface worker-side exceptions to stderr instead of dying
             # silently; without this the parent sees EOFError with no clue.
-            import sys as _sys, traceback as _tb, os as _os
-            _sys.stderr.write(
-                f"[DelayedSubprocVecEnv._worker pid={_os.getpid()}] cmd={cmd!r} "
-                f"raised {_e!r}\n{_tb.format_exc()}"
-            )
+            import os as _os
+            import sys as _sys
+            import traceback as _tb
+
+            _sys.stderr.write(f"[DelayedSubprocVecEnv._worker pid={_os.getpid()}] cmd={cmd!r} raised {_e!r}\n{_tb.format_exc()}")
             _sys.stderr.flush()
             # Try to inform parent, then exit so the parent's recv() returns.
             try:
@@ -107,9 +105,7 @@ def _worker(
 
 
 class DelayedSubprocVecEnv(SubprocVecEnv):
-    def __init__(
-        self, env_fns: List[Callable[[], gym.Env]], start_method: Optional[str] = None
-    ):
+    def __init__(self, env_fns: list[Callable[[], gym.Env]], start_method: str | None = None):
         self.waiting = False
         self.closed = False
         n_envs = len(env_fns)
@@ -122,11 +118,9 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
             start_method = "forkserver" if forkserver_available else "spawn"
         ctx = mp.get_context(start_method)
 
-        self.remotes, self.work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
+        self.remotes, self.work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)], strict=True)
         self.processes = []
-        for idx, (work_remote, remote, env_fn) in enumerate(zip(
-            self.work_remotes, self.remotes, env_fns
-        )):
+        for idx, (work_remote, remote, env_fn) in enumerate(zip(self.work_remotes, self.remotes, env_fns, strict=True)):
             args = (work_remote, remote, CloudpickleWrapper(env_fn), idx)
             # pytype: disable=attribute-error
             t_spawn = time.monotonic()
@@ -141,7 +135,9 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
             remote.recv()
             _init_log.info(
                 "worker %d ready (spawn=%.1fs, init=%.1fs)",
-                idx, t_init - t_spawn, time.monotonic() - t_init,
+                idx,
+                t_init - t_spawn,
+                time.monotonic() - t_init,
             )
 
             time.sleep(1)
@@ -161,23 +157,19 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
         self.observation_space = observation_space
         self.action_space = action_space
         # store info returned by the reset method
-        self.reset_infos: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
+        self.reset_infos: list[dict[str, Any]] = [{} for _ in range(num_envs)]
         # seeds to be used in the next call to env.reset()
-        self._seeds: List[Optional[int]] = [None for _ in range(num_envs)]
+        self._seeds: list[int | None] = [None for _ in range(num_envs)]
         # options to be used in the next call to env.reset()
-        self._options: List[Dict[str, Any]] = [{} for _ in range(num_envs)]
+        self._options: list[dict[str, Any]] = [{} for _ in range(num_envs)]
 
         try:
             render_modes = self.get_attr("render_mode")
         except AttributeError:
-            warnings.warn(
-                "The `render_mode` attribute is not defined in your environment. It will be set to None."
-            )
+            warnings.warn("The `render_mode` attribute is not defined in your environment. It will be set to None.", stacklevel=2)
             render_modes = [None for _ in range(num_envs)]
 
-        assert all(
-            render_mode == render_modes[0] for render_mode in render_modes
-        ), "render_mode mode should be the same for all environments"
+        assert all(render_mode == render_modes[0] for render_mode in render_modes), "render_mode mode should be the same for all environments"
         self.render_mode = render_modes[0]
 
         render_modes = []

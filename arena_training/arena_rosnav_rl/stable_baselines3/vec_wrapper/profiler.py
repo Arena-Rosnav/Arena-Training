@@ -1,7 +1,7 @@
 import pyinstrument
-from stable_baselines3.common.vec_env import VecEnvWrapper
+from stable_baselines3.common.vec_env import VecEnv, VecEnvWrapper
+from stable_baselines3.common.vec_env.base_vec_env import VecEnvObs, VecEnvStepReturn
 
-# from std_msgs.msg import Bool
 from ...node import SupervisorNode
 
 
@@ -21,7 +21,7 @@ class ProfilingVecEnv(VecEnvWrapper):
     def __init__(
         self,
         node: SupervisorNode,
-        env,
+        env: VecEnv,
         profile_step: bool = True,
         profile_reset: bool = True,
         per_call: bool = True,
@@ -41,23 +41,6 @@ class ProfilingVecEnv(VecEnvWrapper):
         self._print_stats = print_stats
         self._log_file = log_file
 
-    #     if enable_subscribers:
-    #         # Set up subscribers
-    #         rospy.Subscriber(
-    #             "/profiler/profile_step", Bool, self._profile_step_callback
-    #         )
-    #         rospy.Subscriber(
-    #             "/profiler/profile_reset", Bool, self._profile_reset_callback
-    #         )
-
-    # def _profile_step_callback(self, msg):
-    #     self._profile_method_step = msg.data
-    #     rospy.loginfo(f"Profile step set to: {self._profile_method_step}")
-
-    # def _profile_reset_callback(self, msg):
-    #     self._profile_method_reset = msg.data
-    #     rospy.loginfo(f"Profile reset set to: {self._profile_method_reset}")
-
     def _output_stats(self, profiler: pyinstrument.Profiler, method_name: str):
         if self._print_stats:
             self._node._logger.info(f"Profiling stats for {method_name}:")
@@ -68,7 +51,7 @@ class ProfilingVecEnv(VecEnvWrapper):
                 f.write(f"\nProfiling stats for {method_name}:\n")
                 f.write(profiler.output_text(unicode=True, color=False))
 
-    def step_wait(self):
+    def step_wait(self) -> VecEnvStepReturn:
         """
         Perform a step in the wrapped environment.
 
@@ -84,16 +67,12 @@ class ProfilingVecEnv(VecEnvWrapper):
             self._step_profiler.stop()
             self._output_stats(self._step_profiler, "step_wait")
 
-        if (
-            self._profile_method_step
-            and self._per_call
-            and self._step_profiler.is_running
-        ):
+        if self._profile_method_step and self._per_call and self._step_profiler.is_running:
             self._step_profiler.reset()
 
         return obs, rewards, dones, infos
 
-    def reset(self):
+    def reset(self) -> VecEnvObs:
         """
         Reset the wrapped environment.
 
@@ -109,11 +88,7 @@ class ProfilingVecEnv(VecEnvWrapper):
             self._reset_profiler.stop()
             self._output_stats(self._reset_profiler, "reset")
 
-        if (
-            self._profile_method_reset
-            and self._per_call
-            and self._reset_profiler.is_running
-        ):
+        if self._profile_method_reset and self._per_call and self._reset_profiler.is_running:
             self._reset_profiler.reset()
 
         return observations

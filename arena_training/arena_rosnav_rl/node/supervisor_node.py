@@ -1,9 +1,8 @@
-import rclpy
-from rclpy.node import Node
-from rclpy.executors import SingleThreadedExecutor
 import threading
 
-from ..cfg import TrainingCfg
+import rclpy
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.node import Node
 
 
 class SupervisorNode(Node):
@@ -26,15 +25,12 @@ class SupervisorNode(Node):
 
         self.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
 
-
     def start_spinning(self):
         """Starts the spin loop in a background thread."""
         if not self._spin_thread.is_alive():
             self._shutdown_event.clear()
             self._spin_thread.start()
-            self.get_logger().info(
-                "SupervisorNode spinning started with SingleThreadedExecutor."
-            )
+            self.get_logger().info("SupervisorNode spinning started with SingleThreadedExecutor.")
 
     def stop_spinning(self):
         """Stops the spin loop."""
@@ -46,6 +42,7 @@ class SupervisorNode(Node):
     def _spin_loop(self):
         """Continuously spins the ROS2 node in a background thread with SingleThreadedExecutor."""
         import traceback as _tb
+
         while not self._shutdown_event.is_set():
             try:
                 # Use the executor to handle all callback groups
@@ -54,18 +51,19 @@ class SupervisorNode(Node):
                 # Never let the spin thread die silently: dying makes every
                 # async service call wait forever on its completion event.
                 try:
-                    self.get_logger().error(
-                        f"[SupervisorNode._spin_loop] exception: {e!r}\n{_tb.format_exc()}"
-                    )
+                    self.get_logger().error(f"[SupervisorNode._spin_loop] exception: {e!r}\n{_tb.format_exc()}")
                 except Exception:
                     import sys as _sys
+
                     print(
                         f"[SupervisorNode._spin_loop] exception: {e!r}\n{_tb.format_exc()}",
-                        file=_sys.stderr, flush=True,
+                        file=_sys.stderr,
+                        flush=True,
                     )
                 # If the rclpy context died, exit cleanly instead of spinning hot.
                 try:
                     import rclpy as _rclpy
+
                     if not _rclpy.ok():
                         break
                 except Exception:
@@ -78,7 +76,7 @@ class SupervisorNode(Node):
         super().destroy_node()
 
 
-def main(args=None):
+def main(args: list[str] | None = None):
     from arena_rclpy_mixins.spin import spin_node
 
     rclpy.init(args=args)

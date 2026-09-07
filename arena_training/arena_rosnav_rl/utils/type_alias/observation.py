@@ -1,30 +1,21 @@
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
-    List,
-    Literal,
-    NewType,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
+
 import gymnasium
-from ...utils.paths import Path, PathComponent
+
+from ...utils.paths import PathComponent
 
 # Gym Env
-EnvironmentType = TypeVar(
-    "EnvironmentType", bound=Union[gymnasium.Env, gymnasium.Wrapper]
-)
-InformationDict = Dict[str, Any]
+EnvironmentType = TypeVar("EnvironmentType", bound=gymnasium.Env | gymnasium.Wrapper)
+InformationDict = dict[str, Any]
 
-PathsDict = Dict[Type[PathComponent], PathComponent]
+PathsDict = dict[type[PathComponent], PathComponent]
 
-CustomDiscreteAction = Dict[str, Union[str, float]]
-CustomDiscreteActionList = List[CustomDiscreteAction]
+CustomDiscreteAction = dict[str, str | float]
+CustomDiscreteActionList = list[CustomDiscreteAction]
 
 ObservationCollectorDataClass = TypeVar("ObservationCollectorDataClass")
 

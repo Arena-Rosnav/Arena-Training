@@ -1,28 +1,25 @@
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Self
 
 import rosnav_rl
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ..utils.training import build_training_commented_map
 from .arena_cfg import ArenaBaseCfg
 from .sb3_cfg import ArenaSB3Cfg
-from ..utils.training import build_training_commented_map
 
 
 class TrainingCfg(BaseModel):
     __version__ = "0.1.0"
 
-    arena_cfg: Union[ArenaSB3Cfg, ArenaBaseCfg]
+    arena_cfg: ArenaSB3Cfg | ArenaBaseCfg
     agent_config: rosnav_rl.AgentConfig
     resume: bool = False
 
-    agents_dir: Optional[Path] = Field(
+    agents_dir: Path | None = Field(
         None,
-        description=(
-            "Custom base directory for agent artifacts. "
-            "Resolution order: this field → ROSNAV_AGENTS_DIR env var → default."
-        ),
+        description=("Custom base directory for agent artifacts. Resolution order: this field → ROSNAV_AGENTS_DIR env var → default."),
     )
 
     model_config = ConfigDict(
@@ -31,7 +28,7 @@ class TrainingCfg(BaseModel):
     )
 
     @property
-    def resolved_agents_dir(self) -> Optional[Path]:
+    def resolved_agents_dir(self) -> Path | None:
         """Resolve the agents directory with a 3-level fallback chain.
 
         Priority:
@@ -48,7 +45,7 @@ class TrainingCfg(BaseModel):
 
         return None  # let PathFactory use its default
 
-    def to_yaml(self, path: Union[str, Path]) -> None:
+    def to_yaml(self, path: str | Path) -> None:
         """Save the full training config as a structured, human-readable YAML."""
         from ruamel.yaml import YAML
 
@@ -60,12 +57,8 @@ class TrainingCfg(BaseModel):
             ry.dump(build_training_commented_map(self), f)
 
     @model_validator(mode="after")
-    def validate_resume(self):
+    def validate_resume(self) -> Self:
         if self.resume:
-            assert (
-                self.agent_config.name is not None
-            ), "Agent name must be provided for resume!"
-            assert (
-                self.agent_config.framework.algorithm.checkpoint is not None
-            ), "Checkpoint must be provided for resume!"
+            assert self.agent_config.name is not None, "Agent name must be provided for resume!"
+            assert self.agent_config.framework.algorithm.checkpoint is not None, "Checkpoint must be provided for resume!"
         return self

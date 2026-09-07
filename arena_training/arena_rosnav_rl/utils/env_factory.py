@@ -1,9 +1,8 @@
-"""Environment factory functions — create and wrap gym environments for RL training."""
+"""Environment factory functions, create and wrap gym environments for RL training."""
 
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable
 
 import gymnasium as gym
-import rclpy
 import rosnav_rl
 from rosnav_rl.utils.rostopic import Namespace
 from stable_baselines3.common.utils import set_random_seed
@@ -16,7 +15,6 @@ from ..cfg import (
     MonitoringCfg,
     ProfilingCfg,
 )
-from ...environments.wrappers import TimeSyncWrapper
 from ..node import SupervisorNode
 from ..stable_baselines3.vec_wrapper import (
     DelayedSubprocVecEnv,
@@ -31,21 +29,15 @@ def load_vec_framestack(stack_size: int, env: VecEnv) -> VecEnv:
     return VecFrameStack(env, n_stack=stack_size, channels_order="first")
 
 
-def determine_env_class(simulator: Simulator) -> Union[gym.Env, gym.Wrapper]:
+def determine_env_class(simulator: Simulator) -> gym.Env | gym.Wrapper:
     """Determines the environment class based on the specified simulator."""
     return arena_envs.GazeboEnv
-    if simulator == Simulator.FLATLAND:
-        return arena_envs.FlatlandEnv
-    elif simulator == Simulator.GAZEBO:
-        return arena_envs.GazeboEnv
-    else:
-        raise RuntimeError(f"Simulator {simulator} is not supported.")
 
 
 def _init_env_fnc(
     node: SupervisorNode,
     env_class: gym.Env,
-    ns: Union[str, Namespace],
+    ns: str | Namespace,
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
@@ -53,10 +45,10 @@ def _init_env_fnc(
     init_by_call: bool = False,
     obs_unit_kwargs: dict = None,
     seed: int = 0,
-    wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
 ) -> callable:
 
-    def _init_env() -> Union[gym.Env, gym.Wrapper]:
+    def _init_env() -> gym.Env | gym.Wrapper:
         env = env_class(
             node=node,
             ns=ns,
@@ -78,7 +70,7 @@ def _init_env_fnc(
 
 def _test_init_env_fnc(
     env_class: gym.Env,
-    ns: Union[str, Namespace],
+    ns: str | Namespace,
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
@@ -87,11 +79,11 @@ def _test_init_env_fnc(
     init_by_call: bool = False,
     obs_unit_kwargs: dict = None,
     seed: int = 0,
-    wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
-    observations_config: Optional[str] = None,
+    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    observations_config: str | None = None,
 ) -> callable:
 
-    def _init_env() -> Union[gym.Env, gym.Wrapper]:
+    def _init_env() -> gym.Env | gym.Wrapper:
         env = env_class(
             node=node,
             ns=ns,
@@ -114,7 +106,7 @@ def _test_init_env_fnc(
 
 def sb3_wrap_env(
     node: SupervisorNode,
-    env_fncs: List[callable],
+    env_fncs: list[callable],
     general_cfg: GeneralCfg,
     monitoring_cfg: MonitoringCfg,
     profiling_cfg: ProfilingCfg,
@@ -124,12 +116,8 @@ def sb3_wrap_env(
     evaluation (shared-env mode).
     """
 
-    def create_env(fncs):
-        return (
-            DelayedSubprocVecEnv(fncs, start_method="forkserver")
-            if not general_cfg.debug_mode
-            else DummyVecEnv(fncs)
-        )
+    def create_env(fncs: list[Callable]) -> VecEnv:
+        return DelayedSubprocVecEnv(fncs, start_method="forkserver") if not general_cfg.debug_mode else DummyVecEnv(fncs)
 
     def apply_vec_stats_recorder(env: VecEnv) -> VecEnv:
         return (
@@ -180,9 +168,9 @@ def make_envs(
     init_env_by_call: bool,
     namespace_fn: Callable,
     node: SupervisorNode = None,
-    wrappers: List[Callable[[Tuple[Type[gym.Wrapper], Any]], gym.Wrapper]] = None,
-    observations_config: Optional[str] = None,
-) -> List[Callable]:
+    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    observations_config: str | None = None,
+) -> list[Callable]:
     """
     Creates a list of environment initialization functions.
 
@@ -200,7 +188,7 @@ def make_envs(
         List of callables, each initializing a gym environment when called.
     """
 
-    def create_env_fnc(ns: Union[str, Namespace]) -> callable:
+    def create_env_fnc(ns: str | Namespace) -> callable:
         return _test_init_env_fnc(
             node=node,
             env_class=determine_env_class(None),

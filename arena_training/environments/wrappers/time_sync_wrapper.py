@@ -1,13 +1,23 @@
-import gymnasium as gym
+from __future__ import annotations
+
 import time
+from typing import TYPE_CHECKING
+
 from rclpy.node import Node
 from rclpy.time import Time  # Import Time for type hinting
-
 from rosnav_rl.model.dreamerv3.envs.wrappers import _GymDelegatingWrapper
+
+if TYPE_CHECKING:
+    import numpy as np
+    from rosnav_rl.utils.type_aliases import EncodedObservationDict
+
+    from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
+
+    from ..base_env import ArenaBaseEnv
 
 
 class TimeSyncWrapper(_GymDelegatingWrapper):
-    def __init__(self, env, control_hz: float = 10.0, warning_slop: float = 0.1):
+    def __init__(self, env: ArenaBaseEnv, control_hz: float = 10.0, warning_slop: float = 0.1):
         """
         A Gym Wrapper to synchronize step calls to a specific control frequency using ROS 2 time.
 
@@ -39,7 +49,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         self._rate = env.node.create_rate(control_hz, clock=self.clock)
         self._last_step_exit_wall = time.monotonic()
 
-    def _initialize_environment(self):
+    def _initialize_environment(self) -> None:
         """Delegates to the wrapped env's _initialize_environment."""
         return self.env._initialize_environment()
 
@@ -47,7 +57,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         """Returns the current ROS time as an rclpy.time.Time object."""
         return self.clock.now()
 
-    def step(self, action):
+    def step(self, action: np.ndarray) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
         """
         Executes a step in the environment, ensuring the control frequency is respected.
         If called too frequently, this method will block (while spinning the node)
@@ -58,7 +68,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         elapsed_nanosec = (current_time - self.last_step_initiation_time).nanoseconds
 
         # Warn if the actual interval is longer than the desired one, indicating a missed control frequency.
-        # Skip the check right after a reset — the gap is caused by the reset itself
+        # Skip the check right after a reset, the gap is caused by the reset itself
         # (or SubprocVecEnv waiting on sibling envs), not a real control loop miss.
         if self._skip_frequency_check:
             self._skip_frequency_check = False
@@ -69,8 +79,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
             # throttle_duration_sec=5.0: rcutils suppresses DDS publish within window
             # (check happens before the rosout publish, so suppressed calls have zero DDS overhead)
             self.node.get_logger().warn(
-                f"Control frequency missed! "
-                f"Desired: {desired_hz:.2f}Hz, Actual: {actual_hz:.2f}Hz, wall_gap={wall_gap_ms:.0f}ms",
+                f"Control frequency missed! Desired: {desired_hz:.2f}Hz, Actual: {actual_hz:.2f}Hz, wall_gap={wall_gap_ms:.0f}ms",
                 throttle_duration_sec=5.0,
             )
 
@@ -88,7 +97,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         self._last_step_exit_wall = time.monotonic()
         return _result
 
-    def reset(self, **kwargs):
+    def reset(self, **kwargs: object) -> tuple[EncodedObservationDict, InformationDict]:
         """
         Resets the environment. Also resets the step timing mechanism for the first step
         after reset, similar to __init__.

@@ -18,19 +18,19 @@ right value based on ``threshold_type`` and delegates to
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from rclpy.node import Node
-
 from rosnav_rl.utils.curriculum.curriculum_base import CurriculumBase
+
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.task import StagedCfg
 
 _log = logging.getLogger(__name__)
 
 # Maps threshold_type config values to the key present in the metrics dict
 # passed by helper.train() → after_eval_fn.
-_METRIC_KEY: Dict[str, str] = {
-    "rew":  "eval_return",
+_METRIC_KEY: dict[str, str] = {
+    "rew": "eval_return",
     "succ": "eval_success_rate",
 }
 
@@ -43,10 +43,10 @@ class DreamerV3Curriculum(CurriculumBase):
 
     Implements the two abstract methods of ``CurriculumBase``:
 
-    * ``get_current_performance()``  — returns the most recent metric value
+    * ``get_current_performance()``, returns the most recent metric value
       (eval_return or eval_success_rate, depending on ``threshold_type``)
       logged after an evaluation phase, or *None* if no evaluation has run yet.
-    * ``reset_performance_tracking()`` — resets the tracked metric to *-inf* so
+    * ``reset_performance_tracking()``, resets the tracked metric to *-inf* so
       the next stage starts fresh.
 
     The bridge between the DreamerV3 training loop and this class is the thin
@@ -62,7 +62,7 @@ class DreamerV3Curriculum(CurriculumBase):
         num_envs: int,
         verbose: int = 0,
         *,
-        tm_dict: Optional[Dict[str, Any]] = None,
+        tm_dict: dict[str, Any] | None = None,
     ):
         """Construct from a ``StagedCfg`` config object.
 
@@ -77,10 +77,7 @@ class DreamerV3Curriculum(CurriculumBase):
         # constructor calls _apply_curriculum() which may trigger
         # get_current_performance() indirectly through hooks.
         self._last_performance: float = float("-inf")
-        train_stages = [
-            s.model_dump(by_alias=True, exclude_none=True)
-            for s in staged_cfg.curriculum_definition
-        ]
+        train_stages = [s.model_dump(by_alias=True, exclude_none=True) for s in staged_cfg.curriculum_definition]
         super().__init__(
             node=node,
             train_stages=train_stages,
@@ -99,7 +96,7 @@ class DreamerV3Curriculum(CurriculumBase):
 
     # ── CurriculumBase abstract interface ──────────────────────────────────
 
-    def get_current_performance(self) -> Optional[float]:
+    def get_current_performance(self) -> float | None:
         """Return the last recorded performance metric, or *None* before first eval."""
         if self._last_performance == float("-inf"):
             return None
@@ -111,7 +108,7 @@ class DreamerV3Curriculum(CurriculumBase):
 
     # ── DreamerV3 hook ─────────────────────────────────────────────────────
 
-    def after_eval_hook(self, metrics: Dict[str, float]) -> None:
+    def after_eval_hook(self, metrics: dict[str, float]) -> None:
         """Called by ``helper.train()`` after every evaluation phase.
 
         Picks the right metric from *metrics* based on ``self.threshold_type``
