@@ -303,7 +303,7 @@ arena_cfg:
           task.random.static.models: []
           task.random.interactive.models: []
           task.random.dynamic.models: []
-          goal_tolerance_radius: 1.5
+          task.episode.goto_pose.tolerance.radius: 1.5
 
         # Stage 2: Few static obstacles
         - task.random.static.n: [2, 4]
@@ -312,7 +312,7 @@ arena_cfg:
           task.random.static.models: [chair, table]
           task.random.interactive.models: []
           task.random.dynamic.models: []
-          goal_tolerance_radius: 1.2
+          task.episode.goto_pose.tolerance.radius: 1.2
 
         # Stage 3: More static obstacles + first dynamic
         - task.random.static.n: [3, 5]
@@ -321,7 +321,7 @@ arena_cfg:
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
           task.random.dynamic.models: [actor1]
-          goal_tolerance_radius: 1.0
+          task.episode.goto_pose.tolerance.radius: 1.0
 
         # Stage 4: Introduce interactive obstacles
         - task.random.static.n: [4, 6]
@@ -330,7 +330,7 @@ arena_cfg:
           task.random.static.models: [chair, table, shelf, plant]
           task.random.interactive.models: [door]
           task.random.dynamic.models: [actor1]
-          goal_tolerance_radius: 0.8
+          task.episode.goto_pose.tolerance.radius: 0.8
   
   profiling: null  # Performance profiling settings (null to disable)
 

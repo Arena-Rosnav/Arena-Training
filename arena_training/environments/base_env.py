@@ -274,9 +274,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        # Client to read goal_tolerance_radius from the co-located task_generator.
+        # Client to read task.episode.goto_pose.tolerance.radius from the co-located task_generator.
         # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
-        # with the curriculum's goal_tolerance_radius.
+        # with the curriculum's task.episode.goto_pose.tolerance.radius.
         tg_node_name = (self.env_ns / "task_generator_node").to_string()
         self._tg_get_params_client = self.node.create_client(
             GetParametersSrv,
@@ -725,10 +725,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         pass
 
     def _after_task_reset(self):
-        """Sync agent_parameters.goal_radius from task_generator's goal_tolerance_radius.
+        """Sync agent_parameters.goal_radius from task_generator's task.episode.goto_pose.tolerance.radius.
 
         When a curriculum is active the curriculum module sends SetParameters to the
-        task_generator node, updating ``goal_tolerance_radius`` there. This hook reads
+        task_generator node, updating ``task.episode.goto_pose.tolerance.radius`` there. This hook reads
         that value back after each episode reset so the reward function's goal-reached
         check stays consistent with the nav-planner's goal tolerance.
         If no curriculum is active (or the param hasn't been set), the value from
@@ -739,7 +739,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             return
         try:
             req = GetParametersSrv.Request()
-            req.names = ["goal_tolerance_radius"]
+            req.names = ["task.episode.goto_pose.tolerance.radius"]
             future = client.call_async(req)
             deadline = time.monotonic() + 0.5
             while not future.done() and time.monotonic() < deadline:
@@ -753,7 +753,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             gtr = float(values[0].double_value)
             if abs(gtr - self.__agent_parameters.goal_radius) > 1e-9:
                 self.__agent_parameters = self.__agent_parameters.model_copy(update={"goal_radius": gtr})
-                self.node.get_logger().info(f"[{self.env_ns.to_string()}] goal_radius synced from task_generator goal_tolerance_radius: {gtr:.3f}")
+                self.node.get_logger().info(f"[{self.env_ns.to_string()}] goal_radius synced from task_generator task.episode.goto_pose.tolerance.radius: {gtr:.3f}")
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().debug(f"goal_radius sync skipped: {exc}")
 

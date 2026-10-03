@@ -138,7 +138,7 @@ arena_cfg:
           task.random.static.models: []
           task.random.interactive.models: []
           task.random.dynamic.models: []
-          goal_tolerance_radius: 1.5
+          task.episode.goto_pose.tolerance.radius: 1.5
 
         # Stage 2: Few static obstacles
         - task.random.static.n: [2, 4]
@@ -147,7 +147,7 @@ arena_cfg:
           task.random.static.models: [Hospital/SM_Chair_01a, Hospital/SM_BedSideTable_01b]
           task.random.interactive.models: []
           task.random.dynamic.models: []
-          goal_tolerance_radius: 1.2
+          task.episode.goto_pose.tolerance.radius: 1.2
 
         # Stage 3: More static obstacles
         - task.random.static.n: [3, 5]
@@ -156,7 +156,7 @@ arena_cfg:
           task.random.static.models: [Hospital/SM_Chair_01a, Hospital/SM_BedSideTable_01b, Hospital/SM_TrashCan]
           task.random.interactive.models: []
           task.random.dynamic.models: []
-          goal_tolerance_radius: 1.0
+          task.episode.goto_pose.tolerance.radius: 1.0
 
         # Stage 4: Static obstacles + dynamic pedestrians
         - task.random.static.n: [3, 5]
@@ -165,7 +165,7 @@ arena_cfg:
           task.random.static.models: [Hospital/SM_Chair_01a, Hospital/SM_BedSideTable_01b, Hospital/SM_TrashCan, Hospital/IV_Stand]
           task.random.interactive.models: []
           task.random.dynamic.models: [Common/Human/arenian]
-          goal_tolerance_radius: 0.8
+          task.episode.goto_pose.tolerance.radius: 0.8
 
   monitoring:
     wandb: # Weights and Biases logging configuration
