@@ -519,6 +519,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
 
             self._reward_function.reset()
+            self._model_space_manager.reset_spaces()
 
             # Get the initial observation after reset.
             obs_dict = self.observation_collector.get_observations(is_terminal=False, is_first=True)
