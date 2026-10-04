@@ -18,6 +18,7 @@ dependencies = [
     "gymnasium>=1.0.0,<2.0.0",
     # Training & Monitoring
     "wandb>=0.13.9,<1.0.0",
+    "optuna>=3.0.0,<6.0.0",
     # Scientific Computing
     "scipy>=1.10.0,<2.0.0",
     # Utilities
