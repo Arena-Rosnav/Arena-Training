@@ -320,7 +320,7 @@ arena_cfg:
           task.random.dynamic.n: [1, 2]
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
-          task.random.dynamic.models: [actor1]
+          task.random.dynamic.models: [arenian]
           task.episode.goto_pose.tolerance.radius: 1.0
 
         # Stage 4: Introduce interactive obstacles
@@ -329,7 +329,7 @@ arena_cfg:
           task.random.dynamic.n: [2, 3]
           task.random.static.models: [chair, table, shelf, plant]
           task.random.interactive.models: [door]
-          task.random.dynamic.models: [actor1]
+          task.random.dynamic.models: [arenian]
           task.episode.goto_pose.tolerance.radius: 0.8
   
   profiling: null  # Performance profiling settings (null to disable)
