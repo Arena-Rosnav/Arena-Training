@@ -19,6 +19,7 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
+    set_robot_pose_frames,
 )
 from rosnav_rl.reward.reward_function import RewardFunction
 from rosnav_rl.reward.reward_units.reward_units import RewardCollision
@@ -117,6 +118,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """
         super().__init__()
         self.node = node
+        self._owns_node = False
         self.env_ns = Namespace(ns) if isinstance(ns, str) else ns
 
         self._is_train_mode = train_mode
@@ -176,6 +178,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
+            self._owns_node = True
             self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
             self.node.start_spinning()
 
@@ -313,14 +316,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         with open(obs_config_path) as file:
             config = yaml.safe_load(file)
 
-        for ds in config.get("datasources", {}).values():
-            if ds.get("type") == "RobotPoseTFGenerator":
-                ds.setdefault("params", {})["source_frame"] = self.robot_source_frame
-                # Use the namespace-qualified odom frame (guaranteed to exist via
-                # odom→base_link broadcast).  The map→odom static TF is an identity
-                # transform anyway, so robot_pose in odom == robot_pose in map.
-                robot_ns_prefix = posixpath.dirname(self.robot_source_frame)
-                ds.setdefault("params", {})["target_frame"] = posixpath.join(robot_ns_prefix, "odom")
+        set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
@@ -512,6 +508,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
                 self.node.get_logger().info(f"[{self.env_ns.to_string()}] Resetting environment after episode {prev_id}...")
 
+                self.pause(False)
                 self._before_task_reset()
                 self.reset_task()
                 self._wait_for_new_episode(prev_id)
@@ -548,6 +545,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._step_srv.destroy()
         if self._episode_state_sub is not None:
             self.node.destroy_subscription(self._episode_state_sub)
+        if self._owns_node:
+            self.node.destroy_node()
 
     def pause(self, paused: bool) -> None:
         """Lazy pause/unpause: pause(True) only fires if inference takes longer
@@ -573,11 +572,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 timer.daemon = True
                 self._pause_pending_timer = timer
                 timer.start()
-                fire_unpause_now = False
             else:
-                fire_unpause_now = True
-        if fire_unpause_now:
-            self._fire_pause_request(False)
+                self._fire_pause_request(False)
 
     def _maybe_fire_pause(self, token: object) -> None:
         with self._pause_lock:
@@ -585,7 +581,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 return
             self._pause_pending_token = None
             self._pause_pending_timer = None
-        self._fire_pause_request(True)
+            self._fire_pause_request(True)
 
     def _fire_pause_request(self, paused: bool) -> None:
         if self._pause_srv is None:
