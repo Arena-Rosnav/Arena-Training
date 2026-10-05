@@ -71,12 +71,11 @@ agent_config:
       encoder:
         act: SiLU  # Activation function (Sigmoid Linear Unit) - smooth alternative to ReLU
         cnn_depth: 32  # Depth of convolutional networks for processing image-like inputs
-        #cnn_keys: PedestrianSocialStateSpace|PedestrianTypeSpace|PedestrianVelXSpace|PedestrianVelYSpace|StackedLaserMapSpace  # Observation keys to process with CNNs
-        cnn_keys: StackedLaserMapSpace  # Observation keys to process with CNNs
+        cnn_keys: LaserCartesianMapSpace|PedestrianVelXSpace|PedestrianVelYSpace|PedestrianTypeSpace|PedestrianSocialStateSpace  # Observation keys to process with CNNs
         is_channels_first: true  # Whether input tensor format is channels-first (NCHW) vs channels-last (NHWC)
         kernel_size: 4  # Size of convolutional kernels
         minres: 5  # Minimum resolution for CNN processing
-        mlp_keys: DistAngleToSubgoalSpace  # Observation keys to process with MLPs
+        mlp_keys: DistAngleToGoalSpace|LastActionSpace  # Observation keys to process with MLPs
         mlp_layers: 5  # Number of layers in MLPs
         mlp_units: 1024  # Number of units per MLP layer
         norm: true  # Whether to use layer normalization
@@ -86,13 +85,13 @@ agent_config:
       decoder:
         act: SiLU  # Activation function for decoder networks
         cnn_depth: 32  # Depth of convolutional networks in decoder
-        cnn_keys: StackedLaserMapSpace  # Keys to reconstruct with CNNs
+        cnn_keys: LaserCartesianMapSpace|PedestrianVelXSpace|PedestrianVelYSpace|PedestrianTypeSpace|PedestrianSocialStateSpace  # Keys to reconstruct with CNNs
         cnn_sigmoid: false  # Whether to apply sigmoid to CNN outputs
         image_dist: mse  # Distribution for image reconstruction loss (mean squared error)
         is_channels_first: true  # Channels-first format for image-like data
         kernel_size: 4  # Kernel size for transpose convolutions
         minres: 5  # Minimum resolution for CNN outputs
-        mlp_keys: DistAngleToSubgoalSpace  # Keys to reconstruct with MLPs
+        mlp_keys: DistAngleToGoalSpace  # Keys to reconstruct with MLPs
         mlp_layers: 5  # Number of layers in decoder MLPs
         mlp_units: 1024  # Units per decoder MLP layer
         norm: true  # Use layer normalization in decoder

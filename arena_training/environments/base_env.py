@@ -19,6 +19,7 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
+    set_pedestrians_topic,
     set_robot_pose_frames,
 )
 from rosnav_rl.reward.reward_function import RewardFunction
@@ -317,6 +318,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             config = yaml.safe_load(file)
 
         set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
+        set_pedestrians_topic(config, self.robot_ns.to_string())
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
