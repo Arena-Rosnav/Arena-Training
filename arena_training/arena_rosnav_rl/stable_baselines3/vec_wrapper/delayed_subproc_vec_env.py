@@ -48,11 +48,8 @@ def _worker(
     while True:
         try:
             cmd, data = remote.recv()
-            if cmd in ("step", "observe"):
-                if cmd == "step":
-                    observation, reward, terminated, truncated, info = env.step(data)
-                else:
-                    observation, reward, terminated, truncated, info = env.get_wrapper_attr("observe")()
+            if cmd == "step":
+                observation, reward, terminated, truncated, info = env.step(data)
                 # convert to SB3 VecEnv api
                 done = terminated or truncated
                 info["TimeLimit.truncated"] = truncated and not terminated
@@ -153,15 +150,11 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
         self._gathered = all(self.get_attr("lockstep"))
 
     def step_async(self, actions: np.ndarray) -> None:
-        if not self._gathered:
-            super().step_async(actions)
-            return
-        for index, action in enumerate(actions):
-            self.env_method("apply_action", action, indices=index)
-        self.env_method("step_sim", indices=0)
-        for remote in self.remotes:
-            remote.send(("observe", None))
-        self.waiting = True
+        if self._gathered:
+            for index, action in enumerate(actions):
+                self.env_method("apply_action", action, indices=index)
+            self.env_method("step_sim", indices=0)
+        super().step_async(actions)
 
     def parent_init(
         self,

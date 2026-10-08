@@ -163,6 +163,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._lockstep_step_seconds: float = lockstep_step_seconds
         self._step_srv = None
         self._lockstep_hold_active: bool = False
+        self._action_applied: bool = False
         self._initialized = False
 
         if not init_by_call:
@@ -382,13 +383,20 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         4. Calculates the reward and determines if the episode has terminated.
         5. Returns the standard Gymnasium step tuple.
         """
-        self.apply_action(action)
-        if self._lockstep:
-            self.step_sim()
-        return self.observe()
+        if self._action_applied:
+            self._action_applied = False
+        else:
+            self._publish_action(action)
+            if self._lockstep:
+                self.step_sim()
+        return self._observe()
 
     def apply_action(self, action: np.ndarray) -> None:
-        """Publishes the action as a velocity command."""
+        """Publishes the action ahead of a shared sim step, the next step() only observes."""
+        self._publish_action(action)
+        self._action_applied = True
+
+    def _publish_action(self, action: np.ndarray) -> None:
         decoded_action = self._decode_action(action)
 
         # First step() means agent inference returned at least once: model is loaded.
@@ -402,9 +410,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Advances the held sim by one lockstep step."""
         self._step_sim(self._lockstep_step_seconds)
 
-    @flush_errors_decorator
-    def observe(self) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
-        """Collects the observation, reward and termination of the current step."""
+    def _observe(self) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
         try:
             obs_dict = self.observation_collector.get_observations(
                 simulation_state_container=self.__agent_parameters,
@@ -512,7 +518,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._wait_for_new_episode(prev_id=0)
                 self._after_task_reset()
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else 1
-            elif self._latest_episode is not None and self._latest_episode.outcome_state == EpisodeRecord.QUEUED and steps_this_episode == 0:
+            elif self._latest_episode is not None and self._latest_episode.outcome_state in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING) and steps_this_episode == 0:
                 # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
                 pass
             else:
