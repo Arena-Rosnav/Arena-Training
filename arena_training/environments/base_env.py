@@ -72,12 +72,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         "fleet_wait_timeout": 60.0,
     }
 
-    _LOCKSTEP_PARAM_DEFAULTS = {
-        "lockstep": False,
-        # Quantized to physics ticks server-side by sim_lifecycle/step.
-        "lockstep_step_seconds": 0.0999,
-    }
-
     def __init__(
         self,
         ns: str | Namespace,
@@ -91,6 +85,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         obs_unit_kwargs: dict[str, Any] | None = None,
         train_mode: bool = True,
         observations_config: str | None = None,
+        lockstep: bool = False,
+        lockstep_step_seconds: float = 0.0999,
         *args: object,
         **kwargs: object,
     ):
@@ -116,6 +112,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 passed to the constructors of individual observation units. Defaults to None.
             observations_config (Optional[str]): Path to the observations YAML config file.
                 If None, uses the default bundled config.
+            lockstep (bool): Default of the `lockstep` node parameter. Defaults to False.
+            lockstep_step_seconds (float): Default of the `lockstep_step_seconds` node parameter.
+                Defaults to 0.0999.
         """
         super().__init__()
         self.node = node
@@ -160,8 +159,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_lock = threading.Lock()
         self._pause_lazy_threshold: float = 1.5
         # Lockstep: gym-exact stepping via sim_lifecycle/step, lazy pause stays idle while on.
-        self._lockstep: bool = False
-        self._lockstep_step_seconds: float = 0.0999
+        self._lockstep: bool = lockstep
+        self._lockstep_step_seconds: float = lockstep_step_seconds
         self._step_srv = None
         self._lockstep_hold_active: bool = False
         self._initialized = False
@@ -294,7 +293,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self.node.declare_parameter(name, default)
 
     def _declare_lockstep_params(self) -> None:
-        for name, default in self._LOCKSTEP_PARAM_DEFAULTS.items():
+        for name, default in (
+            ("lockstep", self._lockstep),
+            ("lockstep_step_seconds", self._lockstep_step_seconds),
+        ):
             if not self.node.has_parameter(name):
                 self.node.declare_parameter(name, default)
         self._lockstep = bool(self.node.get_parameter("lockstep").value)
@@ -345,6 +347,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def is_train_mode(self) -> bool:
         return self._is_train_mode
 
+    @property
+    def lockstep(self) -> bool:
+        return self._lockstep
+
     def _initialize_agent_components(
         self,
         space_manager: BaseSpaceManager | dict[str, Any],
@@ -376,6 +382,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         4. Calculates the reward and determines if the episode has terminated.
         5. Returns the standard Gymnasium step tuple.
         """
+        self.apply_action(action)
+        if self._lockstep:
+            self.step_sim()
+        return self.observe()
+
+    def apply_action(self, action: np.ndarray) -> None:
+        """Publishes the action as a velocity command."""
         decoded_action = self._decode_action(action)
 
         # First step() means agent inference returned at least once: model is loaded.
@@ -385,9 +398,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         # Publish velocity command directly, no nav2 controller dependency.
         self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
 
-        if self._lockstep:
-            self._step_sim(self._lockstep_step_seconds)
+    def step_sim(self) -> None:
+        """Advances the held sim by one lockstep step."""
+        self._step_sim(self._lockstep_step_seconds)
 
+    @flush_errors_decorator
+    def observe(self) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
+        """Collects the observation, reward and termination of the current step."""
         try:
             obs_dict = self.observation_collector.get_observations(
                 simulation_state_container=self.__agent_parameters,

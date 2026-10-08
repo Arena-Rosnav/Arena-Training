@@ -6,7 +6,7 @@ import gymnasium as gym
 import rosnav_rl
 from rosnav_rl.utils.rostopic import Namespace
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
+from stable_baselines3.common.vec_env import VecFrameStack
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from ... import environments as arena_envs
@@ -18,6 +18,7 @@ from ..cfg import (
 from ..node import SupervisorNode
 from ..stable_baselines3.vec_wrapper import (
     DelayedSubprocVecEnv,
+    GatheredDummyVecEnv,
     ProfilingVecEnv,
     VecStatsRecorder,
 )
@@ -81,6 +82,8 @@ def _test_init_env_fnc(
     seed: int = 0,
     wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
     observations_config: str | None = None,
+    lockstep: bool = False,
+    lockstep_step_seconds: float = 0.0999,
 ) -> callable:
 
     def _init_env() -> gym.Env | gym.Wrapper:
@@ -94,6 +97,8 @@ def _test_init_env_fnc(
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
             observations_config=observations_config,
+            lockstep=lockstep,
+            lockstep_step_seconds=lockstep_step_seconds,
             wait_for_obs=True,
         )
         for wrapper in wrappers or []:
@@ -117,7 +122,7 @@ def sb3_wrap_env(
     """
 
     def create_env(fncs: list[Callable]) -> VecEnv:
-        return DelayedSubprocVecEnv(fncs, start_method="forkserver") if not general_cfg.debug_mode else DummyVecEnv(fncs)
+        return DelayedSubprocVecEnv(fncs, start_method="forkserver") if not general_cfg.debug_mode else GatheredDummyVecEnv(fncs)
 
     def apply_vec_stats_recorder(env: VecEnv) -> VecEnv:
         return (
@@ -146,14 +151,6 @@ def sb3_wrap_env(
             else env
         )
 
-    if node is not None:
-        for name, value in (
-            ("lockstep", general_cfg.lockstep),
-            ("lockstep_step_seconds", general_cfg.lockstep_step_seconds),
-        ):
-            if not node.has_parameter(name):
-                node.declare_parameter(name, value)
-
     env = create_env(env_fncs)
     env = apply_vec_stats_recorder(env)
     env = apply_profiling(env)
@@ -170,6 +167,8 @@ def make_envs(
     node: SupervisorNode = None,
     wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
     observations_config: str | None = None,
+    lockstep: bool = False,
+    lockstep_step_seconds: float = 0.0999,
 ) -> list[Callable]:
     """
     Creates a list of environment initialization functions.
@@ -183,6 +182,8 @@ def make_envs(
         namespace_fn: Function mapping index → environment namespace string.
         wrappers: Optional gym wrappers to apply to each environment.
         observations_config: Path to a custom observations YAML config file.
+        lockstep: Gym-exact stepping via sim_lifecycle/step.
+        lockstep_step_seconds: Sim seconds advanced per gym step under lockstep.
 
     Returns:
         List of callables, each initializing a gym environment when called.
@@ -200,6 +201,8 @@ def make_envs(
             init_by_call=init_env_by_call,
             wrappers=wrappers,
             observations_config=observations_config,
+            lockstep=lockstep,
+            lockstep_step_seconds=lockstep_step_seconds,
         )
 
     return [create_env_fnc(ns=namespace_fn(idx)) for idx in range(n_envs)]

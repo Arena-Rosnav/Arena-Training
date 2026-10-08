@@ -183,6 +183,8 @@ class StableBaselines3Trainer(ArenaTrainer):
             simulation_state_container=self.agent_parameters,
             wrappers=[partial(TimeSyncWrapper, control_hz=self.config.arena_cfg.general.control_hz)],
             observations_config=self.config.agent_config.observations_config,
+            lockstep=self.config.arena_cfg.general.lockstep,
+            lockstep_step_seconds=self.config.arena_cfg.general.lockstep_step_seconds,
         )
         t0 = time.monotonic()
         env = sb3_wrap_env(

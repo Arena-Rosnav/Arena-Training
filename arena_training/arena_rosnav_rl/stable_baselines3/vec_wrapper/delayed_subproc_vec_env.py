@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Callable
 
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper
 from stable_baselines3.common.vec_env.patch_gym import _patch_env
@@ -47,8 +48,11 @@ def _worker(
     while True:
         try:
             cmd, data = remote.recv()
-            if cmd == "step":
-                observation, reward, terminated, truncated, info = env.step(data)
+            if cmd in ("step", "observe"):
+                if cmd == "step":
+                    observation, reward, terminated, truncated, info = env.step(data)
+                else:
+                    observation, reward, terminated, truncated, info = env.get_wrapper_attr("observe")()
                 # convert to SB3 VecEnv api
                 done = terminated or truncated
                 info["TimeLimit.truncated"] = truncated and not terminated
@@ -146,6 +150,18 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
         observation_space, action_space = self.remotes[0].recv()
 
         self.parent_init(len(env_fns), observation_space, action_space)
+        self._gathered = all(self.get_attr("lockstep"))
+
+    def step_async(self, actions: np.ndarray) -> None:
+        if not self._gathered:
+            super().step_async(actions)
+            return
+        for index, action in enumerate(actions):
+            self.env_method("apply_action", action, indices=index)
+        self.env_method("step_sim", indices=0)
+        for remote in self.remotes:
+            remote.send(("observe", None))
+        self.waiting = True
 
     def parent_init(
         self,
