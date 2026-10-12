@@ -37,6 +37,9 @@ aliases:
   # Social navigation - pedestrian data
   # people_data: people_detections          # Raw pedestrian detections (people_msgs)
   arena_people_data: arena_pedestrian_detections  # Arena pedestrian detections (arena_people_msgs)
+  pedestrian_relative_locations: arena_pedestrian_relative_locations
+  pedestrian_relative_velocities: arena_pedestrian_relative_velocities
+  pedestrian_social_states: arena_pedestrian_states
 
 datasources:
   # ---------------------------------------------------------------------------
@@ -269,7 +272,13 @@ datasources:
   # arena_pedestrian_distances:
   #   type: ArenaPedestrianDistanceGenerator          # Minimum distances to each Arena pedestrian by ID
 
-  # # Arena pedestrian animation/behavior states
+  # pedestrian_distances:
+  #   type: ArenaPedestrianTypeDistanceGenerator      # Minimum distance per pedestrian type
+
+  # pedestrian_types:
+  #   type: ArenaPedestrianTypeGenerator              # Type code per Arena pedestrian
+
+  # # # Arena pedestrian animation/behavior states
   # arena_pedestrian_states:
   #   type: ArenaPedestrianStateGenerator    # Extracts animation states (IDLE, WALKING, RUNNING, etc.)
 

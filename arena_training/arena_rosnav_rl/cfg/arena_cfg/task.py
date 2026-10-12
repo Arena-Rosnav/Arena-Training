@@ -1,3 +1,4 @@
+import logging
 from typing import Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -38,7 +39,20 @@ class CurriculumStage(BaseModel):
         description="Dynamic obstacle model names",
         alias="task.random.dynamic.models",
     )
-    goal_tolerance_radius: float | None = Field(default=None, description="Goal tolerance radius")
+    task_episode_goto_pose_tolerance_radius: float | None = Field(
+        default=None,
+        description="Goal tolerance radius",
+        alias="task.episode.goto_pose.tolerance.radius",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_deprecated_keys(cls, data: object) -> object:
+        if isinstance(data, dict) and "goal_tolerance_radius" in data:
+            logging.getLogger(__name__).warning("curriculum key 'goal_tolerance_radius' is deprecated, use 'task.episode.goto_pose.tolerance.radius'")
+            data = dict(data)
+            data.setdefault("task.episode.goto_pose.tolerance.radius", data.pop("goal_tolerance_radius"))
+        return data
 
 
 class StagedCfg(BaseModel):

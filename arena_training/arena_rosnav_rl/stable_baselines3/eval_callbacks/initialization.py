@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from rosnav_rl.utils.stable_baselines3.callbacks import (
@@ -19,6 +20,7 @@ def _create_stop_training_callbacks(
     threshold_type: str,
     threshold: float,
     verbose: int = 1,
+    is_last_state_getter: Callable[[], bool] = lambda: True,
 ) -> list:
     """Create stop training callbacks with direct parameters.
 
@@ -26,6 +28,7 @@ def _create_stop_training_callbacks(
         threshold_type: Type of threshold ("rew" or "succ")
         threshold: Threshold value
         verbose: Verbosity level
+        is_last_state_getter: Whether the curriculum is at its last stage
 
     Returns:
         List of stop training callback instances
@@ -34,11 +37,13 @@ def _create_stop_training_callbacks(
         callback = StopTrainingOnRewardThreshold(
             reward_threshold=threshold,
             verbose=verbose,
+            is_last_state_getter=is_last_state_getter,
         )
     else:  # "succ"
         callback = StopTrainingOnSuccessThreshold(
             success_threshold=threshold,
             verbose=verbose,
+            is_last_state_getter=is_last_state_getter,
         )
 
     return [callback]
@@ -100,27 +105,26 @@ def init_sb3_callbacks(
                 timeout=task_cfg.staged.timeout,
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
-            )
-            curriculum_cb._queue_episode(
-                {
+                tm_dict={
                     "tm_robots": task_cfg.tm_robots,
                     "tm_obstacles": task_cfg.tm_obstacles,
                     "tm_modules": task_cfg.tm_modules,
-                }
+                },
             )
             callbacks.append(curriculum_cb)
 
     # Add stop training callbacks
+    # Get curriculum callback for eval callback integration
+    curriculum_cb = next((cb for cb in callbacks if isinstance(cb, StagedTrainCallback)), None)
+
     if stop_train_cfg:
         stop_callbacks = _create_stop_training_callbacks(
             threshold_type=stop_train_cfg.threshold_type,
             threshold=stop_train_cfg.threshold,
             verbose=stop_train_cfg.verbose,
+            is_last_state_getter=(lambda: curriculum_cb.is_final_stage) if curriculum_cb else (lambda: True),
         )
         callbacks.extend(stop_callbacks)
-
-    # Get curriculum callback for eval callback integration
-    curriculum_cb = next((cb for cb in callbacks if isinstance(cb, StagedTrainCallback)), None)
 
     # Get stop training callback for eval callback integration
     stop_cb = next(

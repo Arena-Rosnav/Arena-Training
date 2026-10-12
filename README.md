@@ -63,6 +63,8 @@ arena train sim:=gazebo robot.mobile:=rosnav_rl train_config:=/path/to/dreamer_t
 
 All launch args (`sim`, `world`, `robot`, `robot.mobile`, `robot.mobile.agent`, ...) flow through to `arena_runtime.launch.py` via [`IncludeLaunchDescriptionForward`](../arena_bringup/arena_bringup/actions.py). Fleet size is controlled by `arena_cfg.general.n_envs` in the YAML.
 
+Gym steps are paced on the sim clock at `arena_cfg.general.control_hz`. With `arena_cfg.general.lockstep: true` the envs hold the sim instead and a gym step advances it by `arena_cfg.general.lockstep_step_seconds` through `/arena/sim_lifecycle/step`. With several envs every env's action is applied, the sim is stepped once and then every env observes, in the SB3 vec env and in the DreamerV3 `simulate` loop alike.
+
 `arena train` is sugar for `arena feature training launch ...`. You can visualize the running simulation via `arena viz --all`.
 
 See [`arena_bringup`](../arena_bringup) for all available launch arguments. For agent, observation space, reward and curriculum configuration refer to the [rosnav_rl README](deps/rosnav_rl/README.md).

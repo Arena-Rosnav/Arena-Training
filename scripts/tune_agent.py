@@ -22,9 +22,12 @@ See ``rosnav_rl/tuning/README.md`` for full documentation and YAML examples.
 
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
+
+from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +114,7 @@ def _set_timesteps(config_dict: dict, timesteps: int) -> None:
     )
 
 
-def _make_sb3_trainer(training_cfg, pruner):
+def _make_sb3_trainer(training_cfg, pruner, namespace_fn):
     """Return a StableBaselines3Trainer that injects *pruner* as a callback.
 
     The pruner is added alongside the existing ``eval_cb`` so that SB3's
@@ -139,10 +142,10 @@ def _make_sb3_trainer(training_cfg, pruner):
                 ),
             )
 
-    return _TuningSB3Trainer(training_cfg)
+    return _TuningSB3Trainer(training_cfg, namespace_fn=namespace_fn)
 
 
-def _make_dreamerv3_trainer(training_cfg, pruner):
+def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn):
     """Return a DreamerV3Trainer that chains *pruner.after_eval_hook* with the
     curriculum hook so both receive each evaluation result.
     """
@@ -177,16 +180,17 @@ def _make_dreamerv3_trainer(training_cfg, pruner):
             )
             logger.info("[Train] Training complete.")
 
-    return _TuningDreamerV3Trainer(training_cfg)
+    return _TuningDreamerV3Trainer(training_cfg, namespace_fn=namespace_fn)
 
-def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
+
+def make_objective(tuning_cfg, base_config_dict: dict, namespace_fn: Callable[[int], str]):
     """Return an Optuna objective function that runs one full trial."""
     from rosnav_rl import SupportedRLFrameworks
     from rosnav_rl.tuning import apply_params, suggest_params, SB3TrialPruner, DreamerV3TrialPruner
 
     # Maps each supported framework to (pruner_factory, trainer_factory).
     # pruner_factory(trial) → framework-specific TrialPruner
-    # trainer_factory(training_cfg, pruner) → ArenaTrainer subclass
+    # trainer_factory(training_cfg, pruner, namespace_fn) -> ArenaTrainer subclass
     _tuning_registry = {
         SupportedRLFrameworks.STABLE_BASELINES3: (
             lambda trial: SB3TrialPruner(trial, metric=tuning_cfg.metric, verbose=1),
@@ -229,7 +233,7 @@ def make_objective(tuning_cfg, base_config_dict: dict, tuning_cfg_path: Path):
             )
         make_pruner, make_trainer = _tuning_registry[framework]
         pruner = make_pruner(trial)
-        trainer = make_trainer(training_cfg, pruner)
+        trainer = make_trainer(training_cfg, pruner, namespace_fn)
 
         # \u2500\u2500 5. Run training \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         try:
@@ -294,6 +298,18 @@ def main() -> int:
     base_config_path = _resolve_base_config(args.config, tuning_cfg.base_config)
     logger.info("Base training config: %s", base_config_path)
     base_config_dict = _load_yaml(base_config_path)
+    obs_cfg = base_config_dict.get("agent_config", {}).get("observations_config")
+    if obs_cfg and not Path(obs_cfg).is_absolute():
+        base_config_dict["agent_config"]["observations_config"] = str(base_config_path.parent / obs_cfg)
+
+    wait_for_simulation(timeout=120.0)
+
+    n_envs: int = base_config_dict["arena_cfg"]["general"]["n_envs"]
+    per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false"] for _ in range(n_envs)]
+    env_map = spawn_envs(n_envs, per_env_launch_args)
+
+    def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
+        return m[idx]
 
     optuna_pruner = _build_optuna_pruner(tuning_cfg.pruner)
     study = optuna.create_study(
@@ -314,7 +330,7 @@ def main() -> int:
     logger.info("  Params:    %s", list(tuning_cfg.search_space.keys()))
     logger.info("=" * 70)
 
-    objective = make_objective(tuning_cfg, base_config_dict)
+    objective = make_objective(tuning_cfg, base_config_dict, namespace_fn)
     study.optimize(objective, n_trials=tuning_cfg.n_trials)
 
     logger.info("\n" + "=" * 70)

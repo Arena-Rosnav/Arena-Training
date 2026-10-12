@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Callable
 
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper
 from stable_baselines3.common.vec_env.patch_gym import _patch_env
@@ -146,6 +147,14 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
         observation_space, action_space = self.remotes[0].recv()
 
         self.parent_init(len(env_fns), observation_space, action_space)
+        self._gathered = all(self.get_attr("lockstep"))
+
+    def step_async(self, actions: np.ndarray) -> None:
+        if self._gathered:
+            for index, action in enumerate(actions):
+                self.env_method("apply_action", action, indices=index)
+            self.env_method("step_sim", indices=0)
+        super().step_async(actions)
 
     def parent_init(
         self,

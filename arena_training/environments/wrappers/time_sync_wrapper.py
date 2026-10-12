@@ -62,7 +62,11 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         Executes a step in the environment, ensuring the control frequency is respected.
         If called too frequently, this method will block (while spinning the node)
         until the control interval has passed since the last step initiation.
+        Under lockstep the env's own sim step sets the interval.
         """
+        if self.env.lockstep:
+            return self.env.step(action)
+
         _t_entry_wall = time.monotonic()
         current_time = self._now()
         elapsed_nanosec = (current_time - self.last_step_initiation_time).nanoseconds

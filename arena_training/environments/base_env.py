@@ -20,6 +20,8 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
+    set_pedestrians_topic,
+    set_robot_pose_frames,
 )
 from rosnav_rl.reward.reward_function import RewardFunction
 from rosnav_rl.reward.reward_units.reward_units import RewardCollision
@@ -73,12 +75,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         "fleet_wait_timeout": 60.0,
     }
 
-    _LOCKSTEP_PARAM_DEFAULTS = {
-        "lockstep": False,
-        # Quantized to physics ticks server-side by sim_lifecycle/step.
-        "lockstep_step_seconds": 0.0999,
-    }
-
     def __init__(
         self,
         ns: str | Namespace,
@@ -92,6 +88,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         obs_unit_kwargs: dict[str, Any] | None = None,
         train_mode: bool = True,
         observations_config: str | None = None,
+        lockstep: bool = False,
+        lockstep_step_seconds: float = 0.0999,
         *args: object,
         **kwargs: object,
     ):
@@ -117,9 +115,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 passed to the constructors of individual observation units. Defaults to None.
             observations_config (Optional[str]): Path to the observations YAML config file.
                 If None, uses the default bundled config.
+            lockstep (bool): Default of the `lockstep` node parameter. Defaults to False.
+            lockstep_step_seconds (float): Default of the `lockstep_step_seconds` node parameter.
+                Defaults to 0.0999.
         """
         super().__init__()
         self.node = node
+        self._owns_node = False
         self.env_ns = Namespace(ns) if isinstance(ns, str) else ns
 
         self._is_train_mode = train_mode
@@ -162,10 +164,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_lock = threading.Lock()
         self._pause_lazy_threshold: float = 1.5
         # Lockstep: gym-exact stepping via sim_lifecycle/step, lazy pause stays idle while on.
-        self._lockstep: bool = False
-        self._lockstep_step_seconds: float = 0.0999
+        self._lockstep: bool = lockstep
+        self._lockstep_step_seconds: float = lockstep_step_seconds
         self._step_srv = None
         self._lockstep_hold_active: bool = False
+        self._action_applied: bool = False
         self._initialized = False
 
         if not init_by_call:
@@ -181,6 +184,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
             self.node = SupervisorNode(node_name=env_node_name)
+            self._owns_node = True
             self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
             self.node.start_spinning()
 
@@ -301,7 +305,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self.node.declare_parameter(name, default)
 
     def _declare_lockstep_params(self) -> None:
-        for name, default in self._LOCKSTEP_PARAM_DEFAULTS.items():
+        for name, default in (
+            ("lockstep", self._lockstep),
+            ("lockstep_step_seconds", self._lockstep_step_seconds),
+        ):
             if not self.node.has_parameter(name):
                 self.node.declare_parameter(name, default)
         self._lockstep = bool(self.node.get_parameter("lockstep").value)
@@ -324,14 +331,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         with open(obs_config_path) as file:
             config = yaml.safe_load(file)
 
-        for ds in config.get("datasources", {}).values():
-            if ds.get("type") == "RobotPoseTFGenerator":
-                ds.setdefault("params", {})["source_frame"] = self.robot_source_frame
-                # Use the namespace-qualified odom frame (guaranteed to exist via
-                # odom→base_link broadcast).  The map→odom static TF is an identity
-                # transform anyway, so robot_pose in odom == robot_pose in map.
-                robot_ns_prefix = posixpath.dirname(self.robot_source_frame)
-                ds.setdefault("params", {})["target_frame"] = posixpath.join(robot_ns_prefix, "odom")
+        set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
+        set_pedestrians_topic(config, self.robot_ns.to_string())
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
@@ -357,6 +358,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     @property
     def is_train_mode(self) -> bool:
         return self._is_train_mode
+
+    @property
+    def lockstep(self) -> bool:
+        return self._lockstep
 
     def _initialize_agent_components(
         self,
@@ -406,6 +411,20 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         4. Calculates the reward and determines if the episode has terminated.
         5. Returns the standard Gymnasium step tuple.
         """
+        if self._action_applied:
+            self._action_applied = False
+        else:
+            self._publish_action(action)
+            if self._lockstep:
+                self.step_sim()
+        return self._observe()
+
+    def apply_action(self, action: np.ndarray) -> None:
+        """Publishes the action ahead of a shared sim step, the next step() only observes."""
+        self._publish_action(action)
+        self._action_applied = True
+
+    def _publish_action(self, action: np.ndarray) -> None:
         decoded_action = self._decode_split_action(action)
 
         # First step() means agent inference returned at least once: model is loaded.
@@ -417,12 +436,15 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 # Publish velocity command directly, no nav2 controller dependency.
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
             elif type_name == "arm":
-                self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(decoded, self._arm_joint_names))
+                self._joint_trajectory_pub.publish(
+                    get_joint_trajectory_from_action(decoded, self._arm_joint_names)
+                )
 
+    def step_sim(self) -> None:
+        """Advances the held sim by one lockstep step."""
+        self._step_sim(self._lockstep_step_seconds)
 
-        if self._lockstep:
-            self._step_sim(self._lockstep_step_seconds)
-
+    def _observe(self) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
         try:
             obs_dict = self.observation_collector.get_observations(
                 simulation_state_container=self.__agent_parameters,
@@ -536,7 +558,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._wait_for_new_episode(prev_id=0)
                 self._after_task_reset()
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else 1
-            elif self._latest_episode is not None and self._latest_episode.outcome_state == EpisodeRecord.QUEUED and steps_this_episode == 0:
+            elif self._latest_episode is not None and self._latest_episode.outcome_state in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING) and steps_this_episode == 0:
                 # No-op fresh reset (e.g. simulate-loop's iter-1 double reset).
                 pass
             else:
@@ -551,6 +573,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
                 self.node.get_logger().info(f"[{self.env_ns.to_string()}] Resetting environment after episode {prev_id}...")
 
+                self.pause(False)
                 self._before_task_reset()
                 self.reset_task()
                 self._wait_for_new_episode(prev_id)
@@ -558,6 +581,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
 
             self._reward_function.reset()
+            self._model_space_manager.reset_spaces()
 
             # Get the initial observation after reset.
             obs_dict = self.observation_collector.get_observations(is_terminal=False, is_first=True)
@@ -586,6 +610,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._step_srv.destroy()
         if self._episode_state_sub is not None:
             self.node.destroy_subscription(self._episode_state_sub)
+        if self._owns_node:
+            self.node.destroy_node()
 
     def pause(self, paused: bool) -> None:
         """Lazy pause/unpause: pause(True) only fires if inference takes longer
@@ -611,11 +637,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 timer.daemon = True
                 self._pause_pending_timer = timer
                 timer.start()
-                fire_unpause_now = False
             else:
-                fire_unpause_now = True
-        if fire_unpause_now:
-            self._fire_pause_request(False)
+                self._fire_pause_request(False)
 
     def _maybe_fire_pause(self, token: object) -> None:
         with self._pause_lock:
@@ -623,7 +646,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 return
             self._pause_pending_token = None
             self._pause_pending_timer = None
-        self._fire_pause_request(True)
+            self._fire_pause_request(True)
 
     def _fire_pause_request(self, paused: bool) -> None:
         if self._pause_srv is None:
@@ -764,10 +787,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         pass
 
     def _after_task_reset(self):
-        """Sync agent_parameters.goal_radius from task_generator's goal_tolerance_radius.
+        """Sync agent_parameters.goal_radius from task_generator's task.episode.goto_pose.tolerance.radius.
 
         When a curriculum is active the curriculum module sends SetParameters to the
-        task_generator node, updating ``goal_tolerance_radius`` there. This hook reads
+        task_generator node, updating ``task.episode.goto_pose.tolerance.radius`` there. This hook reads
         that value back after each episode reset so the reward function's goal-reached
         check stays consistent with the nav-planner's goal tolerance.
         If no curriculum is active (or the param hasn't been set), the value from
@@ -778,7 +801,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             return
         try:
             req = GetParametersSrv.Request()
-            req.names = ["goal_tolerance_radius"]
+            req.names = ["task.episode.goto_pose.tolerance.radius"]
             future = client.call_async(req)
             deadline = time.monotonic() + 0.5
             while not future.done() and time.monotonic() < deadline:
@@ -792,7 +815,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             gtr = float(values[0].double_value)
             if abs(gtr - self.__agent_parameters.goal_radius) > 1e-9:
                 self.__agent_parameters = self.__agent_parameters.model_copy(update={"goal_radius": gtr})
-                self.node.get_logger().info(f"[{self.env_ns.to_string()}] goal_radius synced from task_generator goal_tolerance_radius: {gtr:.3f}")
+                self.node.get_logger().info(f"[{self.env_ns.to_string()}] goal_radius synced from task_generator task.episode.goto_pose.tolerance.radius: {gtr:.3f}")
         except Exception as exc:  # noqa: BLE001
             self.node.get_logger().debug(f"goal_radius sync skipped: {exc}")
 

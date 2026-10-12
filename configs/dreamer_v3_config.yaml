@@ -304,7 +304,7 @@ arena_cfg:
           task.random.static.models: []
           task.random.interactive.models: []
           task.random.dynamic.models: [Common/Pedestrian/arenian]
-          goal_tolerance_radius: 1.0
+          task.episode.goto_pose.tolerance.radius: 1.0
 
         # Stage 1: 7 pedestrians + light clutter
         - task.random.static.n: [2, 2]
@@ -313,7 +313,7 @@ arena_cfg:
           task.random.static.models: [chair, table]
           task.random.interactive.models: []
           task.random.dynamic.models: [Common/Pedestrian/arenian]
-          goal_tolerance_radius: 0.75
+          task.episode.goto_pose.tolerance.radius: 0.75
 
         # Stage 2: 11 pedestrians + moderate clutter (increased from 9)
         - task.random.static.n: [3, 3]
@@ -322,7 +322,7 @@ arena_cfg:
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
           task.random.dynamic.models: [Common/Pedestrian/arenian]
-          goal_tolerance_radius: 0.5
+          task.episode.goto_pose.tolerance.radius: 0.5
 
         # Stage 3: 15 pedestrians + dense clutter — full difficulty (increased from 12)
         - task.random.static.n: [4, 4]
@@ -331,6 +331,6 @@ arena_cfg:
           task.random.static.models: [chair, table, shelf]
           task.random.interactive.models: []
           task.random.dynamic.models: [Common/Pedestrian/arenian]
-          goal_tolerance_radius: 0.4
+          task.episode.goto_pose.tolerance.radius: 0.4
 
   profiling: null

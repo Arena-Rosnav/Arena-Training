@@ -4,7 +4,7 @@ from arena_bringup.substitutions import LaunchArgument, deprecated_launch_args
 from launch.actions import ExecuteProcess, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
-from launch_ros.substitutions import FindPackageShare
+from launch_ros.substitutions import ExecutableInPackage, FindPackageShare
 
 
 def generate_launch_description():
@@ -32,7 +32,7 @@ def generate_launch_description():
     )
 
     train_agent = ExecuteProcess(
-        cmd=['ros2', 'run', 'arena_training', 'train_agent.py',
+        cmd=[ExecutableInPackage('train_agent.py', 'arena_training'),
              '--config', train_config.substitution],
         output='screen',
         on_exit=launch.actions.Shutdown(reason='train_agent exited'),

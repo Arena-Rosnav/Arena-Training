@@ -135,6 +135,8 @@ class DreamerV3Trainer(ArenaTrainer):
                 dreamerv3.RenameObsForDreamer,
             ],
             observations_config=self.config.agent_config.observations_config,
+            lockstep=general_cfg.lockstep,
+            lockstep_step_seconds=general_cfg.lockstep_step_seconds,
         )
 
         if general_cfg.debug_mode:
