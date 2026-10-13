@@ -31,6 +31,7 @@ from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from task_generator_msgs.srv import ResetEpisode
+from utils.arena_rclpy_mixins.arena_rclpy_mixins import Time
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
@@ -129,8 +130,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             raise ValueError("A reward function is required for training mode.")
 
         self._initialize_agent_components(space_manager, reward_function)
-        self._arm_joint_names = self._extract_arm_joint_names()
         self.__agent_parameters = simulation_state_container
+
+        self._arm_joint_names = self._extract_arm_joint_names()
+        self._last_step_time = None
+        self._default_dt = 0.0999
+        self._traj_min_dt: float = 1e-3
+        self._traj_max_dt: float = 0.5 
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
@@ -400,6 +406,22 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Encodes the given observation using the model space encoder."""
         return self._model_space_manager.encode_observation(observation)
 
+    def _get_dt(self) -> float:
+        """Returns the fixed lockstep duration or dynamically calculates elapsed time."""
+        now = Time.parse(self.node.get_clock().now())
+        if self.lockstep:
+            self._last_step_time = now
+            return self._lockstep_step_seconds
+
+        if self._last_step_time is None:
+            dt = self._default_dt
+        else:
+            dt = (now - self._last_step_time).to_seconds()
+            dt = min(max(dt, self._traj_min_dt), self._traj_max_dt)
+
+        self._last_step_time = now
+        return dt
+
     @flush_errors_decorator
     def step(self, action: np.ndarray) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
         """
@@ -437,7 +459,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
             elif type_name == "arm":
                 self._joint_trajectory_pub.publish(
-                    get_joint_trajectory_from_action(decoded, self._arm_joint_names)
+                    get_joint_trajectory_from_action(decoded, self._arm_joint_names, self._get_dt())
                 )
 
     def step_sim(self) -> None:
@@ -543,6 +565,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._joint_trajectory_pub.publish(
                 get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, self._arm_joint_names)
             )
+
+        self._last_step_time = None
 
         try:
             steps_this_episode = self._steps_curr_episode
