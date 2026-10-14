@@ -110,7 +110,7 @@ datasources:
   #   type: people_msgs/People          # → PedestrianDetections
   #   params:
   #     topic: "/task_generator_node/people"                  # People tracker output
-  #     up_to_date_required: true
+  #     up_to_date_required: false
 
   # Arena pedestrian detection (arena_people_msgs)
   arena_pedestrian_detections:
@@ -235,7 +235,6 @@ datasources:
     type: PedestrianRelativeVelYGenerator        # Left/right velocity component
 
   # Pedestrian classification and social states
-
   # pedestrian_distances:
   #   type: PedestrianDistanceGenerator            # Minimum distances to each pedestrian group
 
@@ -287,7 +286,7 @@ datasources:
 #
 # Additional collectors:
 #   rear_camera:
-#     type: sensor_msgs/Image
+#     type: ImageColorCollector
 #     params:
 #       topic: "camera_rear/image_raw"
 #
