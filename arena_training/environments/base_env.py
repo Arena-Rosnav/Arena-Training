@@ -31,7 +31,7 @@ from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from task_generator_msgs.srv import ResetEpisode
-from arena_rclpy_mixins import Time
+from arena_rclpy_mixins.Time import Time
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
