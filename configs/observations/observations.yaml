@@ -146,9 +146,9 @@ datasources:
 
   # Arm state 
   joint_states:
-    type: sensor_msgs/JointState     # → JointState
+    type: control_msgs/msg/JointTrajectoryControllerState     # → JointState
     params:
-      topic: "joint_states"
+      topic: "arm_controller/controller_state"
       up_to_date_required: true
 
   # ---------------------------------------------------------------------------
