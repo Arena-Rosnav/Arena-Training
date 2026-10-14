@@ -261,8 +261,6 @@ class ArenaTrainer(ABC):
                 angular_range=angular,
             )
 
-            
-        # Multi arm config technically possible but not fully supported
         arms = caps.arm
         if arms:
             for mount_name, arm_spec in arms.items():

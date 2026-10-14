@@ -295,9 +295,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
-        # Client to read goal_tolerance_radius from the co-located task_generator.
+        # Client to read task.episode.goto_pose.tolerance.radius from the co-located task_generator.
         # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
-        # with the curriculum's goal_tolerance_radius.
+        # with the curriculum's task.episode.goto_pose.tolerance.radius.
         tg_node_name = (self.env_ns / "task_generator_node").to_string()
         self._tg_get_params_client = self.node.create_client(
             GetParametersSrv,
