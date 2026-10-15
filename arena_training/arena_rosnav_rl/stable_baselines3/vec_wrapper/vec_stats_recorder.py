@@ -69,7 +69,9 @@ class VecStatsRecorder(VecEnvWrapper):
                 self.cum_rewards[idx] = 0.0
 
                 self.episode_lengths.append(infos[idx]["episode_length"])
-                self.done_reasons[infos[idx]["done_reason"].name] += 1
+                reason = infos[idx]["done_reason"]
+                key = reason.name if isinstance(reason, DONE_REASONS) else str(reason)
+                self.done_reasons[key] = self.done_reasons.get(key, 0) + 1
 
                 self.num_episodes += 1
 

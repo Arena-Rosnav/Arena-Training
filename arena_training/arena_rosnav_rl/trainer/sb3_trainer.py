@@ -230,11 +230,15 @@ class StableBaselines3Trainer(ArenaTrainer):
 
     def _train_impl(self, *args: object, **kwargs: object) -> None:
         """Implementation of training logic."""
+        total = self.config.agent_config.framework.algorithm.parameters.total_timesteps
+        done = self.agent.model.model.num_timesteps if self.is_resume else 0
         self.agent.train(
-            total_timesteps=self.config.agent_config.framework.algorithm.parameters.total_timesteps,
+            total_timesteps=max(total - done, 0),
+            reset_num_timesteps=not self.is_resume,
             callback=self.eval_cb,
             progress_bar=self.config.agent_config.framework.algorithm.parameters.show_progress_bar,
         )
+        self._save_model(checkpoint="last_model")
 
     def _complete_model_initialization(self, train_env: VecEnv) -> None:
         """Complete the initialization of the RL model.

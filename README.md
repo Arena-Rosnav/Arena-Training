@@ -51,7 +51,7 @@ source arena
 
 ### Launching the full stack (recommended)
 
-`arena train` brings up arena and training in one step. It runs [`launch/training.launch.py`](launch/training.launch.py), which includes `arena_bringup/launch/arena_runtime.launch.py` (runtime-only, no auto-spawn) and starts `train_agent.py`. The training script reads `n_envs` from the config YAML and spawns envs via `/arena/spawn_env`.
+`arena train` brings up arena and training in one step. It runs [`launch/training.launch.py`](launch/training.launch.py), which includes `arena_bringup/launch/arena_runtime.launch.py` (runtime-only, no auto-spawn) and starts `train_agent.py`. The training script reads `n_envs` from the config YAML and spawns envs via `/arena/spawn_env`, each with `task.episode.spawn.robot_clearance` set to `arena_cfg.general.safety_distance`, so a robot standing at its spawn is clear of the safe-distance penalty.
 
 ```bash
 # Config name resolved from arena_training/configs/

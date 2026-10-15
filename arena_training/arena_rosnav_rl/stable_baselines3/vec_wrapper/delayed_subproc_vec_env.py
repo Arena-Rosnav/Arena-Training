@@ -105,6 +105,12 @@ def _worker(
             break
 
 
+def _raise_worker_error(results: list[Any]) -> None:
+    for result in results:
+        if isinstance(result, tuple) and len(result) == 2 and result[0] == "__worker_error__":
+            raise RuntimeError(f"training env worker failed: {result[1]}")
+
+
 class DelayedSubprocVecEnv(SubprocVecEnv):
     def __init__(self, env_fns: list[Callable[[], gym.Env]], start_method: str | None = None):
         self.waiting = False
@@ -152,8 +158,8 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
     def step_async(self, actions: np.ndarray) -> None:
         if self._gathered:
             for index, action in enumerate(actions):
-                self.env_method("apply_action", action, indices=index)
-            self.env_method("step_sim", indices=0)
+                _raise_worker_error(self.env_method("apply_action", action, indices=index))
+            _raise_worker_error(self.env_method("step_sim", indices=0))
         super().step_async(actions)
 
     def parent_init(
