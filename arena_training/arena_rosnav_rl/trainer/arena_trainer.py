@@ -90,7 +90,6 @@ class ArenaTrainer(ABC):
     def __init__(
         self,
         config: arena_cfg.TrainingCfg,
-        resume: bool = False,
         namespace_fn: Callable[[int], str] = None,
     ) -> None:
         """
@@ -103,7 +102,7 @@ class ArenaTrainer(ABC):
             raise ValueError("namespace_fn is required")
         self._validate_config(config)
         self.config = config
-        self.__resume = resume
+        self.__resume = config.resume
         self.namespace_fn = namespace_fn
 
         self._setup_supervisor_node()
