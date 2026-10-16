@@ -26,6 +26,8 @@ aliases:
   # Core robot state
   robot_pose: robot_pose_from_tf    # Primary robot localization source
   # robot_pose_tf: robot_pose_from_tf   # Alternative TF-based localization
+
+  end_effector_pose: end_effector_pose_from_tf # Primary end effector Localization Source
   
   # Navigation targets
   # goal: goal_pose                     # Final navigation target
@@ -33,7 +35,7 @@ aliases:
   # nav_path: navigation_path          # Planned trajectory
   
   # Social navigation - pedestrian data
-  # people_data: people_detections          # Raw pedestrian detections (people_msgs)
+  people_data: people_detections          # Raw pedestrian detections (people_msgs)
   arena_people_data: arena_pedestrian_detections  # Arena pedestrian detections (arena_people_msgs)
   pedestrian_relative_locations: arena_pedestrian_relative_locations
   pedestrian_relative_velocities: arena_pedestrian_relative_velocities
@@ -50,35 +52,59 @@ datasources:
   
   # Robot localization sources
   # robot_pose_from_odom:
-  #   type: nav_msgs/Odometry             # → Pose2D
+  #   type: nav_msgs/Odometry          # → Pose2D
   #   params:
-  #     topic: "odom"                    # Standard odometry topic
-  #     up_to_date_required: true        # Require fresh data for temporal synchronization
+  #     topic: "odom"                  # Standard odometry topic
+  #     up_to_date_required: true      # Require fresh data for temporal synchronization
 
   robot_pose_from_tf:
-    type: RobotPoseTFGenerator         # Generator (no ROS topic) → Pose2D
+    type: RobotPoseTFGenerator         # Listens to TF tree → Pose2D 
     params: {}                         # Uses simulation_state_container for frame config
+
+  end_effector_pose_from_tf:
+    type: EndEffectorPoseTFGenerator   # Generator (no ROS topic) → Pose3D
+    params: {}                          
 
   # Sensor data collectors
   front_laser:
     type: sensor_msgs/LaserScan        # → LidarRanges
     params:
-      topic: "lidar"                    # Primary lidar topic
+      topic: "lidar"                   # Primary lidar topic
       up_to_date_required: true        # Critical for obstacle avoidance
 
-  # Navigation target collectors  
-  goal_pose:
-    type: geometry_msgs/PoseStamped   # → Pose2D
+  # Cameras
+
+  wrist_color:
+    type: ImageColorCollector
     params:
-      topic: "goal_pose"                # Navigation goal from planner (relative to namespace)
+      topic: "wrist_camera/image"
+
+  arm_base_color:
+    type: ImageColorCollector
+    params:
+      topic: "arm_base_camera/image"
+
+  # Navigation target collectors 
+
+  goal_pose:
+    type: geometry_msgs/PoseStamped    # → Pose2D
+    params:
+      topic: "goal_pose"               # Navigation goal from planner (relative to namespace)
       up_to_date_required: false       # Goal updates less frequently
 
   subgoal_pose:
+<<<<<<< HEAD
+    type: geometry_msgs/PoseStamped    # → Pose2D
+    params:
+      topic: "subgoal"                 # Intermediate waypoint
+      up_to_date_required: false       # Subgoal updates less frequently
+=======
     type: StraightLineSubgoalGenerator  # Lookahead on the robot-to-goal line from the last command
+>>>>>>> d3f68ed
 
   # Robot control and action data
   last_action:
-    type: geometry_msgs/Twist         # → RobotVelocity
+    type: geometry_msgs/Twist          # → RobotVelocity
     params:
       topic: "cmd_vel"                 # Robot velocity commands
       # up_to_date_required: true
@@ -88,20 +114,20 @@ datasources:
   #   type: people_msgs/People          # → PedestrianDetections
   #   params:
   #     topic: "/task_generator_node/people"                  # People tracker output
-  #     up_to_date_required: false
+  #     up_to_date_required: true
 
   # Arena pedestrian detection (arena_people_msgs)
   arena_pedestrian_detections:
     type: arena_people_msgs/Pedestrians  # → ArenaPedestrianDetections
     params:
-      topic: "arena_peds"              # Rebased onto the env namespace at load
+      topic: "arena_peds"                # Rebased onto the env namespace at load
       up_to_date_required: false
 
   collision_monitor:
     type: nav2_msgs/CollisionMonitorState  # → SafetyStatus
     params:
       topic: "collision_monitor_state"
-      state_key: "StopPolygon"              # Specific collision state to monitor
+      state_key: "StopPolygon"             # Specific collision state to monitor
 
   # Visual perception
   # front_camera:
@@ -121,6 +147,13 @@ datasources:
   #   params:
   #     topic: "collision_monitor_state"
   #     state_key: "collision"            # Specific collision state to monitor
+
+  # Arm state
+  joint_states:
+    type: control_msgs/JointTrajectoryControllerState     # → JointState
+    params:
+      topic: "arm_controller/controller_state"
+      up_to_date_required: true
 
   # ---------------------------------------------------------------------------
   # OPTIONAL COLLECTORS: Additional sensors for advanced configurations
@@ -164,9 +197,15 @@ datasources:
   subgoal_in_robot_frame:
     type: SubgoalLocationInRobotFrameGenerator  # Transforms subgoal from world → robot frame
 
+  arm_goal_in_ee_frame:
+    type: ArmGoalLocationInEndEffectorFrameGenerator
+
   # Navigation metrics - distance and angle computations
   dist_angle_to_goal:
     type: DistAngleToGoalGenerator           # Computes [distance, angle] to goal
+
+  arm_dist_angle_to_goal:                    
+    type: ArmDistAngleToGoalGenerator        # Computes [distance_error, angle_error] to goal
 
   dist_angle_to_subgoal:
     type: DistAngleToSubgoalGenerator        # Computes [distance, angle] to subgoal
@@ -189,7 +228,7 @@ datasources:
   # pedestrian_world_locations:
   #   type: PedestrianLocationGenerator            # Extracts world coordinates of pedestrians
 
-  # Pedestrian motion analysis
+  # # Pedestrian motion analysis
   # pedestrian_relative_velocities:
   #   type: PedestrianRelativeVelGenerator         # Computes pedestrian velocities in robot frame
 
@@ -199,10 +238,11 @@ datasources:
   pedestrian_vel_y:
     type: PedestrianRelativeVelYGenerator        # Left/right velocity component
 
-  # Pedestrian classification and social states
+  # # Social navigation metrics
   # pedestrian_distances:
   #   type: PedestrianDistanceGenerator            # Minimum distances to each pedestrian group
 
+  # # Pedestrian classification and social states
   # pedestrian_types:
   #   type: PedestrianTypeGenerator                # Extracts pedestrian group/type classifications
 
@@ -251,7 +291,7 @@ datasources:
 #
 # Additional collectors:
 #   rear_camera:
-#     type: ImageColorCollector
+#     type: sensor_msgs/Image
 #     params:
 #       topic: "camera_rear/image_raw"
 #
@@ -267,11 +307,11 @@ datasources:
 #
 # Additional collectors:
 #   rear_laser:
-#     type: LaserScanCollector  
+#     type: sensor_msgs/LaserScan
 #     params:
 #       topic: "scan_rear"
 #   left_laser:
-#     type: LaserScanCollector
+#     type: sensor_msgs/LaserScan
 #     params:
 #       topic: "scan_left"
 #

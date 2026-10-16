@@ -245,9 +245,12 @@ class ArenaTrainer(ABC):
         from rosnav_rl.cfg.action_spaces import (
             DifferentialDriveActionSpace,
             OmnidirectionalActionSpace,
+            ManipulatorActionSpace,
+            CompositeActionSpace
         )
 
         robot_cfg = self.config.arena_cfg.robot
+        caps = robot_cfg.effective_caps
         robot_desc = robot_cfg.robot_description
         general = self.config.arena_cfg.general
         linear, lateral, angular = action_ranges(robot_desc)
@@ -264,6 +267,12 @@ class ArenaTrainer(ABC):
                 linear_range=linear,
                 angular_range=angular,
             )
+
+        arms = caps.arm
+        if arms:
+            for mount_name, arm_spec in arms.items():
+                arm_action_space = ManipulatorActionSpace.from_config(arm_spec)
+                action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
