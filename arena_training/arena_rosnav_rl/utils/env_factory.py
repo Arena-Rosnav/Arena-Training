@@ -1,5 +1,6 @@
 """Environment factory functions, create and wrap gym environments for RL training."""
 
+import copy
 from typing import Any, Callable
 
 import gymnasium as gym
@@ -194,7 +195,7 @@ def make_envs(
             node=node,
             env_class=determine_env_class(None),
             ns=ns,
-            space_manager=rl_agent.space_manager,
+            space_manager=copy.deepcopy(rl_agent.space_manager),
             reward_function=rl_agent.reward_function.copy(),
             simulation_state_container=simulation_state_container,
             max_steps_per_episode=max_steps,

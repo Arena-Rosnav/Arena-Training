@@ -22,9 +22,19 @@ from ..utils.training import (
 from ..utils.type_alias.observation import EnvironmentType, PathsDict
 
 if TYPE_CHECKING:
+    from arena_robots.caps import MobileSpec
     from rclpy.parameter import Parameter
 
 _init_log = logging.getLogger("arena_training.init")
+
+
+def action_ranges(robot: MobileSpec) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """(linear, lateral, angular) policy command bounds from the robot's velocity_limits, lateral defaulting to linear."""
+    limits = robot.velocity_limits
+    if limits is None:
+        raise ValueError(f"{robot.path}: caps/mobile.yaml needs velocity_limits to bound the policy's commands")
+    lateral = limits.lateral if limits.lateral is not None else limits.linear
+    return (limits.linear.min, limits.linear.max), (lateral.min, lateral.max), (limits.angular.min, limits.angular.max)
 
 
 @dataclass
@@ -80,7 +90,6 @@ class ArenaTrainer(ABC):
     def __init__(
         self,
         config: arena_cfg.TrainingCfg,
-        resume: bool = False,
         namespace_fn: Callable[[int], str] = None,
     ) -> None:
         """
@@ -93,7 +102,7 @@ class ArenaTrainer(ABC):
             raise ValueError("namespace_fn is required")
         self._validate_config(config)
         self.config = config
-        self.__resume = resume
+        self.__resume = config.resume
         self.namespace_fn = namespace_fn
 
         self._setup_supervisor_node()
@@ -244,15 +253,13 @@ class ArenaTrainer(ABC):
         caps = robot_cfg.effective_caps
         robot_desc = robot_cfg.robot_description
         general = self.config.arena_cfg.general
-        cont = robot_desc.actions.continuous
-        linear = (cont.linear.min, cont.linear.max)
-        angular = (cont.angular.min, cont.angular.max)
+        linear, lateral, angular = action_ranges(robot_desc)
 
         # --- action space from robot description ---
         if robot_desc.is_holonomic:
             action_space = OmnidirectionalActionSpace(
                 linear_range_x=linear,
-                linear_range_y=linear,
+                linear_range_y=lateral,
                 angular_range=angular,
             )
         else:
@@ -282,12 +289,12 @@ class ArenaTrainer(ABC):
             update=dict(
                 laser_num_beams=robot_desc.laser.num_beams,
                 laser_max_range=robot_desc.laser.range,
-                min_linear_vel=cont.linear.min,
-                max_linear_vel=cont.linear.max,
-                min_angular_vel=cont.angular.min,
-                max_angular_vel=cont.angular.max,
-                min_translational_vel=cont.linear.min,
-                max_translational_vel=cont.linear.max,
+                min_linear_vel=linear[0],
+                max_linear_vel=linear[1],
+                min_angular_vel=angular[0],
+                max_angular_vel=angular[1],
+                min_translational_vel=linear[0],
+                max_translational_vel=linear[1],
                 robot_radius=robot_desc.radius,
                 safety_distance=general.safety_distance,
                 goal_radius=general.goal_radius,

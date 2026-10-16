@@ -62,7 +62,7 @@ class DreamerV3Trainer(ArenaTrainer):
     _curriculum: DreamerV3Curriculum | None = None
 
     def __init__(self, config: arena_cfg.TrainingCfg, namespace_fn: Callable[[int], str]):
-        super().__init__(config, config.resume, namespace_fn=namespace_fn)
+        super().__init__(config, namespace_fn=namespace_fn)
 
     def _setup_monitoring(self, *args: object, **kwargs: object):
         """Set up monitoring tools (Weights & Biases) if enabled."""

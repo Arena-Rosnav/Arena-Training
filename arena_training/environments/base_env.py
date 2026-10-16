@@ -1,3 +1,4 @@
+import json
 import os
 import posixpath
 import threading
@@ -13,9 +14,14 @@ import yaml
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
 from geometry_msgs.msg import Twist
+<<<<<<< HEAD
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.srv import GetParameters as GetParametersSrv
+=======
+from rclpy.client import Client
+>>>>>>> d3f68ed
 from rclpy.task import Future
+from rclpy.time import Time
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -41,7 +47,67 @@ from arena_training.arena_rosnav_rl.utils.envs import (
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
+<<<<<<< HEAD
 _ARM_STOW_POSITIONS = np.array([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], dtype=np.float32)
+=======
+_STEP_WINDOW_REFUSAL = "no open unpause window"
+_STEP_WINDOW_WAIT = 60.0
+_GRACE_STEPS = 3
+
+
+def call_hold(client: Client, caller_id: str, reason: str, action: int, timeout: float) -> bool:
+    """One blocking sim_lifecycle/hold call, False when no response arrives within `timeout`."""
+    request = LifecycleHoldSrv.Request(caller_id=caller_id, reason=reason, action=action)
+    completion_event = threading.Event()
+    result_container: dict[str, BaseException | None] = {"exception": None}
+
+    def done_callback(future: Future):
+        try:
+            future.result()
+        except Exception as e:
+            result_container["exception"] = e
+        finally:
+            completion_event.set()
+
+    future = client.call_async(request)
+    future.add_done_callback(done_callback)
+    if not completion_event.wait(timeout=timeout):
+        future.cancel()
+        return False
+    if result_container["exception"] is not None:
+        raise RuntimeError(f"sim_lifecycle/hold ({reason}) failed: {result_container['exception']}")
+    return True
+
+
+def acquire_hold(client: Client, caller_id: str, reason: str, timeout: float, attempts: int = 3) -> None:
+    """Holds the sim once under (caller_id, reason), releasing before each re-sent acquire."""
+    for attempt in range(attempts):
+        if attempt:
+            call_hold(client, caller_id, reason, LifecycleHoldSrv.Request.RELEASE, timeout)
+        if call_hold(client, caller_id, reason, LifecycleHoldSrv.Request.ACQUIRE, timeout):
+            return
+    raise RuntimeError(f"sim_lifecycle/hold ({reason}) timed out {attempts} times after {timeout}s each")
+
+
+def goal_tolerance(record: EpisodeRecord, robot: str) -> float | None:
+    """Tolerance radius of the robot's first goto phase in the episode record, None without one."""
+    phases = json.loads(record.phases or "{}").get(robot, {}).get("phases", [])
+    return next((float(phase["tolerance_radius"]) for phase in phases if "tolerance_radius" in phase), None)
+
+
+def suppress_grace_collision(steps: int, reward: float, done: bool, info: InformationDict, reward_function: RewardFunction) -> tuple[float, bool]:
+    """Undoes a collision in the first `_GRACE_STEPS` steps of an episode: no termination, no latch, no penalty."""
+    reason = info.get("done_reason")
+    if steps > _GRACE_STEPS or not done or not (reason == DONE_REASONS.COLLISION or str(reason) == str(DONE_REASONS.COLLISION)):
+        return reward, done
+    info.clear()
+    for unit in reward_function.reward_units:
+        if isinstance(unit, RewardCollision):
+            unit._collision_latched = False
+            reward -= reward_function.state.reward_overview.pop(type(unit).__name__, 0.0)
+    return reward, False
+
+>>>>>>> d3f68ed
 
 class ArenaBaseEnv(ABC, gymnasium.Env):
     """Abstract base class for Arena reinforcement learning environments.
@@ -230,6 +296,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
 
         robot = self._latest_fleet.robots[0].descriptor
+        self._robot_name = robot.name
         self.robot_ns = Namespace(robot.ns)
         base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
         self.robot_source_frame = posixpath.join(robot.frame, base_frame)
@@ -292,16 +359,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 depth=1,
                 durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
             ),
-            callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
-        )
-
-        # Client to read task.episode.goto_pose.tolerance.radius from the co-located task_generator.
-        # Used in _after_task_reset() to keep agent_parameters.goal_radius in sync
-        # with the curriculum's task.episode.goto_pose.tolerance.radius.
-        tg_node_name = (self.env_ns / "task_generator_node").to_string()
-        self._tg_get_params_client = self.node.create_client(
-            GetParametersSrv,
-            f"{tg_node_name}/get_parameters",
             callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
         )
 
@@ -508,15 +565,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         # steps 2-5 collisions immediately follow a collision episode.
         # Use string comparison as a fallback because the task_generator may store
         # the collision reason as str(DONE_REASONS.COLLISION) rather than the enum.
-        _grace_active = self._steps_curr_episode <= 3
-        _dr = info.get("done_reason")
-        _is_collision = _dr == DONE_REASONS.COLLISION or str(_dr) == str(DONE_REASONS.COLLISION)
-        if _grace_active and done and _is_collision:
-            done = False
-            info.clear()
-            for unit in self._reward_function.reward_units:
-                if isinstance(unit, RewardCollision):
-                    unit._collision_latched = False
+        reward, done = suppress_grace_collision(self._steps_curr_episode, reward, done, info, self._reward_function)
         obs_dict["is_terminal"] = done
         self.__is_first_step = False
 
@@ -607,6 +656,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._reward_function.reset()
             self._model_space_manager.reset_spaces()
 
+            if self._latest_episode is not None and not self.observation_collector.wait_for_stamp(Time.from_msg(self._latest_episode.start_time), self._timeout_param("service_wait_timeout")):
+                self.node.get_logger().warn(f"[{self.env_ns.to_string()}] no sensor message from episode {self._latest_episode.episode_id} yet, the first observation may predate the reset")
+
             # Get the initial observation after reset.
             obs_dict = self.observation_collector.get_observations(is_terminal=False, is_first=True)
             obs_dict["is_first"] = True  # Indicate it's the first observation
@@ -693,33 +745,25 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _call_hold_sync(self, action: int, reason: str, timeout: float = 10.0) -> None:
         """Blocking sim_lifecycle/hold call. Raises RuntimeError on failure or timeout."""
-        req = LifecycleHoldSrv.Request()
-        req.caller_id = self.node.get_fully_qualified_name()
-        req.reason = reason
-        req.action = action
-
-        completion_event = threading.Event()
-        result_container = {"exception": None}
-
-        def done_callback(future: Future):
-            try:
-                future.result()
-            except Exception as e:
-                result_container["exception"] = e
-            finally:
-                completion_event.set()
-
-        future = self._pause_srv.call_async(req)
-        future.add_done_callback(done_callback)
-
-        if not completion_event.wait(timeout=timeout):
-            future.cancel()
+        caller_id = self.node.get_fully_qualified_name()
+        if action == LifecycleHoldSrv.Request.ACQUIRE:
+            acquire_hold(self._pause_srv, caller_id, reason, timeout)
+        elif not call_hold(self._pause_srv, caller_id, reason, action, timeout):
             raise RuntimeError(f"sim_lifecycle/hold ({reason}) timed out after {timeout}s")
-        if result_container["exception"] is not None:
-            raise RuntimeError(f"sim_lifecycle/hold ({reason}) failed: {result_container['exception']}")
 
     def _step_sim(self, seconds: float) -> float:
-        """Blocking sim_lifecycle/step call. Raises RuntimeError on failure or timeout."""
+        """Blocking sim_lifecycle/step call that waits out another env's unpause window. Raises RuntimeError on failure or timeout."""
+        timeout = self._timeout_param("service_wait_timeout")
+        deadline = time.monotonic() + (_STEP_WINDOW_WAIT if timeout is None else timeout)
+        while True:
+            result = self._call_step_sim(seconds, timeout)
+            if result.success:
+                return result.advanced
+            if _STEP_WINDOW_REFUSAL not in result.error_msg or time.monotonic() > deadline:
+                raise RuntimeError(f"sim_lifecycle/step failed: {result.error_msg}")
+            time.sleep(0.02)
+
+    def _call_step_sim(self, seconds: float, timeout: float | None) -> LifecycleStepSrv.Response:
         req = LifecycleStepSrv.Request()
         req.seconds = seconds
 
@@ -737,17 +781,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         future = self._step_srv.call_async(req)
         future.add_done_callback(done_callback)
 
-        timeout = self._timeout_param("service_wait_timeout")
         if not completion_event.wait(timeout=timeout):
             future.cancel()
             raise RuntimeError(f"sim_lifecycle/step timed out after {timeout}s")
         if result_container["exception"] is not None:
             raise RuntimeError(f"sim_lifecycle/step call failed: {result_container['exception']}")
-
-        result = result_container["result"]
-        if not result.success:
-            raise RuntimeError(f"sim_lifecycle/step failed: {result.error_msg}")
-        return result.advanced
+        return result_container["result"]
 
     def reset_task(self, timeout: float | None = None, retries: int = 2) -> bool:
         """Call task-generator's lifecycle/reset_episode and block until it completes.
@@ -811,54 +850,23 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         pass
 
     def _after_task_reset(self):
-        """Sync agent_parameters.goal_radius from task_generator's task.episode.goto_pose.tolerance.radius.
-
-        When a curriculum is active the curriculum module sends SetParameters to the
-        task_generator node, updating ``task.episode.goto_pose.tolerance.radius`` there. This hook reads
-        that value back after each episode reset so the reward function's goal-reached
-        check stays consistent with the nav-planner's goal tolerance.
-        If no curriculum is active (or the param hasn't been set), the value from
-        arena_cfg.general.goal_radius (baked into agent_parameters at startup) is kept.
-        """
-        client = self._tg_get_params_client
-        if not client.service_is_ready():
-            return
-        try:
-            req = GetParametersSrv.Request()
-            req.names = ["task.episode.goto_pose.tolerance.radius"]
-            future = client.call_async(req)
-            deadline = time.monotonic() + 0.5
-            while not future.done() and time.monotonic() < deadline:
-                time.sleep(0.01)
-            if not future.done():
-                return
-            values = future.result().values
-            # ParameterType.PARAMETER_NOT_SET == 0; ignore unset params.
-            if not values or values[0].type == 0:
-                return
-            gtr = float(values[0].double_value)
-            if abs(gtr - self.__agent_parameters.goal_radius) > 1e-9:
-                self.__agent_parameters = self.__agent_parameters.model_copy(update={"goal_radius": gtr})
-                self.node.get_logger().info(f"[{self.env_ns.to_string()}] goal_radius synced from task_generator task.episode.goto_pose.tolerance.radius: {gtr:.3f}")
-        except Exception as exc:  # noqa: BLE001
-            self.node.get_logger().debug(f"goal_radius sync skipped: {exc}")
+        """Point the goal-reached radius at the tolerance task_generator judges the new episode with."""
+        tolerance = goal_tolerance(self._latest_episode, self._robot_name) if self._latest_episode is not None else None
+        if tolerance is not None and tolerance != self.__agent_parameters.goal_radius:
+            self.__agent_parameters = self.__agent_parameters.model_copy(update={"goal_radius": tolerance})
 
     def _on_episode_state(self, msg: EpisodeRecord) -> None:
         self._latest_episode = msg
         self._episode_event.set()
 
     def _wait_for_new_episode(self, prev_id: int, timeout: float | None = None) -> bool:
-        """Block until task_generator publishes a fresh QUEUED episode."""
+        """Block until task_generator publishes an episode after `prev_id` as started or ended."""
         if timeout is None:
             timeout = self._timeout_param("episode_wait_timeout")
         deadline = float("inf") if timeout is None else time.monotonic() + timeout
         while time.monotonic() < deadline:
             tg = self._latest_episode
-            # state/episode only carries RUNNING/SUCCESS/FAILED, QUEUED lives on
-            # state/queue, which we don't subscribe to. Any message with a fresh
-            # episode_id means the reset cycle has produced a new episode that's
-            # ready (or already running) for us.
-            if tg is not None and tg.episode_id > prev_id:
+            if tg is not None and tg.episode_id > prev_id and tg.outcome_state != EpisodeRecord.QUEUED:
                 return True
             self._episode_event.clear()
             self._episode_event.wait(timeout=0.1)
