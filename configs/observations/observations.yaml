@@ -67,10 +67,10 @@ datasources:
 
   # Sensor data collectors
   front_laser:
-    type: sensor_msgs/LaserScan        # → LidarRanges
+    type: sensor_msgs/LaserScan       # → LidarRanges
     params:
-      topic: "lidar"                   # Primary lidar topic
-      up_to_date_required: true        # Critical for obstacle avoidance
+      topic: "lidar"                  # Primary lidar topic
+      up_to_date_required: true       # Critical for obstacle avoidance
 
   # Cameras
 
@@ -110,7 +110,7 @@ datasources:
   #   type: people_msgs/People          # → PedestrianDetections
   #   params:
   #     topic: "/task_generator_node/people"                  # People tracker output
-  #     up_to_date_required: false
+  #     up_to_date_required: true
 
   # Arena pedestrian detection (arena_people_msgs)
   arena_pedestrian_detections:
@@ -144,9 +144,9 @@ datasources:
   #     topic: "collision_monitor_state"
   #     state_key: "collision"            # Specific collision state to monitor
 
-  # Arm state 
+  # Arm state
   joint_states:
-    type: control_msgs/msg/JointTrajectoryControllerState     # → JointState
+    type: control_msgs/JointTrajectoryControllerState     # → JointState
     params:
       topic: "arm_controller/controller_state"
       up_to_date_required: true
@@ -224,7 +224,7 @@ datasources:
   # pedestrian_world_locations:
   #   type: PedestrianLocationGenerator            # Extracts world coordinates of pedestrians
 
-  # Pedestrian motion analysis
+  # # Pedestrian motion analysis
   # pedestrian_relative_velocities:
   #   type: PedestrianRelativeVelGenerator         # Computes pedestrian velocities in robot frame
 
@@ -234,10 +234,11 @@ datasources:
   pedestrian_vel_y:
     type: PedestrianRelativeVelYGenerator        # Left/right velocity component
 
-  # Pedestrian classification and social states
+  # # Social navigation metrics
   # pedestrian_distances:
   #   type: PedestrianDistanceGenerator            # Minimum distances to each pedestrian group
 
+  # # Pedestrian classification and social states
   # pedestrian_types:
   #   type: PedestrianTypeGenerator                # Extracts pedestrian group/type classifications
 
@@ -286,7 +287,7 @@ datasources:
 #
 # Additional collectors:
 #   rear_camera:
-#     type: ImageColorCollector
+#     type: sensor_msgs/Image
 #     params:
 #       topic: "camera_rear/image_raw"
 #
@@ -302,11 +303,11 @@ datasources:
 #
 # Additional collectors:
 #   rear_laser:
-#     type: LaserScanCollector  
+#     type: sensor_msgs/LaserScan
 #     params:
 #       topic: "scan_rear"
 #   left_laser:
-#     type: LaserScanCollector
+#     type: sensor_msgs/LaserScan
 #     params:
 #       topic: "scan_left"
 #
