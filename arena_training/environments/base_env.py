@@ -14,12 +14,9 @@ import yaml
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
 from geometry_msgs.msg import Twist
-<<<<<<< HEAD
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.srv import GetParameters as GetParametersSrv
-=======
 from rclpy.client import Client
->>>>>>> d3f68ed
 from rclpy.task import Future
 from rclpy.time import Time
 from rosnav_rl.cfg.parameters import AgentParameters
@@ -47,9 +44,7 @@ from arena_training.arena_rosnav_rl.utils.envs import (
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
-<<<<<<< HEAD
 _ARM_STOW_POSITIONS = np.array([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], dtype=np.float32)
-=======
 _STEP_WINDOW_REFUSAL = "no open unpause window"
 _STEP_WINDOW_WAIT = 60.0
 _GRACE_STEPS = 3
@@ -107,7 +102,6 @@ def suppress_grace_collision(steps: int, reward: float, done: bool, info: Inform
             reward -= reward_function.state.reward_overview.pop(type(unit).__name__, 0.0)
     return reward, False
 
->>>>>>> d3f68ed
 
 class ArenaBaseEnv(ABC, gymnasium.Env):
     """Abstract base class for Arena reinforcement learning environments.
