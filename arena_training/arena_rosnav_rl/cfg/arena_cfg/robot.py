@@ -34,10 +34,7 @@ class RobotCfg(BaseModel):
             parsed_parts = {}
             if self.parts:
                 for category, items in self.parts.items():
-                    parsed_parts[category] = [
-                        RequestPart(**item) if isinstance(item, dict) else item 
-                        for item in items
-                    ]
+                    parsed_parts[category] = [RequestPart(**item) if isinstance(item, dict) else item for item in items]
 
             caps = resolved_view.effective_caps(parts=parsed_parts, frames=self.frames or None)
 

@@ -196,7 +196,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._last_step_time = None
         self._default_dt = 0.0999
         self._traj_min_dt: float = 1e-3
-        self._traj_max_dt: float = 0.5 
+        self._traj_max_dt: float = 0.5
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
@@ -339,7 +339,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # Direct JointTrajectory publisher, the sole source of joint trajectory commands
         # druing training. Compeletly bypassing MoveIt
-        joint_trajectory_topic = self.robot_ns("arm_controller/joint_trajectory").to_string()  
+        joint_trajectory_topic = self.robot_ns("arm_controller/joint_trajectory").to_string()
         self._joint_trajectory_pub = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
         self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
 
@@ -443,14 +443,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def _extract_arm_joint_names(self) -> list[str]:
         """Extracts arm joint names from the action space spec, handling composites."""
         spec = self._model_space_manager.action_space_manager.spec
-        
+
         if getattr(spec, "type", None) == "arm":
             return spec.joint_names
-            
+
         for sub_spec in getattr(spec, "action_spaces", []):
             if sub_spec.type == "arm":
                 return sub_spec.joint_names
-                
+
         return []
 
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
@@ -509,9 +509,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 # Publish velocity command directly, no nav2 controller dependency.
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
             elif type_name == "arm":
-                self._joint_trajectory_pub.publish(
-                    get_joint_trajectory_from_action(decoded, self._arm_joint_names, self._get_dt())
-                )
+                self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(decoded, self._arm_joint_names, self._get_dt()))
 
     def step_sim(self) -> None:
         """Advances the held sim by one lockstep step."""
@@ -605,9 +603,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # Reset arm to stow position
         if self._joint_trajectory_pub is not None:
-            self._joint_trajectory_pub.publish(
-                get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, self._arm_joint_names)
-            )
+            self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, self._arm_joint_names))
 
         self._last_step_time = None
 

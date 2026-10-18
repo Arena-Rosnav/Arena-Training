@@ -61,11 +61,12 @@ def get_twist_from_action(action: np.ndarray) -> Twist:
     twist.angular.z = float(action[2])
     return twist
 
+
 def get_joint_trajectory_from_action(action: np.ndarray, joint_names: List[str], step_time: float = 0.1) -> JointTrajectory:
     """
     Converts an action, joint names and step_time to a JointTrajectory message.
 
-    Args: 
+    Args:
         action (np.ndarray): The action array containing the target positions.
         joint_names (List[str]): The list containing the joint names.
         step time (float): Time between steps.
