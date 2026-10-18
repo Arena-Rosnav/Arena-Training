@@ -1,3 +1,4 @@
+from .action_chunk import VecActionChunk
 from .delayed_subproc_vec_env import DelayedSubprocVecEnv
 from .gathered_dummy_vec_env import GatheredDummyVecEnv
 from .profiler import ProfilingVecEnv
@@ -7,5 +8,6 @@ __all__ = [
     "DelayedSubprocVecEnv",
     "GatheredDummyVecEnv",
     "ProfilingVecEnv",
+    "VecActionChunk",
     "VecStatsRecorder",
 ]

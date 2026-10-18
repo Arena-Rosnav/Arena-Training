@@ -23,7 +23,7 @@ class _OneStepEpisodes(gym.Env):
         return np.zeros(1, dtype=np.float32), {}
 
     def step(self, action: np.ndarray):
-        info = {"done_reason": self.reason, "episode_length": 1}
+        info = {"done_reason": self.reason, "episode_length": 1, "reward_terms": {"collision": -15.0, "approach_goal": 0.5}}
         return np.zeros(1, dtype=np.float32), 1.0, True, False, info
 
 
@@ -40,3 +40,13 @@ def test_task_generator_outcomes_are_counted_next_to_reward_reasons():
     assert venv.done_reasons["task_generator:FAILED"] == 2
     assert venv.done_reasons["COLLISION"] == 2
     assert venv.done_reasons["SUCCESS"] == 0
+
+
+def test_reward_terms_add_up_over_finished_episodes():
+    venv = VecStatsRecorder(DummyVecEnv([lambda: _OneStepEpisodes(DONE_REASONS.COLLISION)] * 2), after_x_eps=100)
+    venv.reset()
+
+    venv.step(np.zeros((2, 1), dtype=np.float32))
+    venv.step(np.zeros((2, 1), dtype=np.float32))
+
+    assert venv.reward_terms == {"collision": -60.0, "approach_goal": 2.0}

@@ -9,6 +9,8 @@ agent_config:
   # Use 'type: differential_drive' or 'type: omnidirectional' for an explicit
   # override; set to null to derive from the robot model automatically.
   action_space: null
+  action_chunk: 1  # commands per policy decision, executed one per control tick (budget, gamma and eval_freq stay in ticks)
+  mirror: none  # none | canonical (nearest pedestrian on the left) | random (whole episodes reflected with probability 0.5)
 
   framework:
     name: stable_baselines3  # ML framework name used for training
@@ -103,6 +105,8 @@ arena_cfg:
     safety_distance: 1.0  # Minimum distance to maintain from obstacles for safety
     show_progress_bar: false  # Display progress bar during training
     control_hz: 10.0  # Control frequency in Hz (wall-clock rate ≈ sim_realtime_factor × control_hz)
+    env_seed: null  # root of the per-env episode seed streams (run_seed "<env_seed>-<i>"), null = random
+    env_launch_args: []  # extra launch args per env, cycled, e.g. [[world:=office_1, humansim.local_planner:=orca]]
 
   # Logging levels for rosnav_rl subsystems and this trainer
   # default_level applies to the entire rosnav_rl.* namespace;

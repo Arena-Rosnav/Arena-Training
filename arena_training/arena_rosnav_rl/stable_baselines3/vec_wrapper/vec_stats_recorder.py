@@ -48,6 +48,7 @@ class VecStatsRecorder(VecEnvWrapper):
         self.episode_returns = []
         self.episode_lengths = []
         self.done_reasons = {done_reason.name: 0 for done_reason in DONE_REASONS}
+        self.reward_terms: dict[str, float] = {}
 
     def step_wait(self) -> VecEnvStepReturn:
         """
@@ -72,6 +73,8 @@ class VecStatsRecorder(VecEnvWrapper):
                 reason = infos[idx]["done_reason"]
                 key = reason.name if isinstance(reason, DONE_REASONS) else str(reason)
                 self.done_reasons[key] = self.done_reasons.get(key, 0) + 1
+                for term, value in infos[idx].get("reward_terms", {}).items():
+                    self.reward_terms[term] = self.reward_terms.get(term, 0.0) + value
 
                 self.num_episodes += 1
 
@@ -100,6 +103,7 @@ class VecStatsRecorder(VecEnvWrapper):
         print(f"Average episode return: {avg_episode_return:.3f} pts")
         print(f"Mean episode length: {avg_episode_length:.1f} steps")
         print(f"Done reasons: {self.done_reasons}")
+        print(f"Reward terms per episode: { {term: round(total / len(self.episode_lengths), 4) for term, total in self.reward_terms.items()} }")
         print("-" * 40, sep="", end="\n")  # Print another line separator
 
         if wandb.run is not None:

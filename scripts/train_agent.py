@@ -194,9 +194,11 @@ def main():
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
 
+        env_seed = config.arena_cfg.general.env_seed
+        extra_args = config.arena_cfg.general.env_launch_args
         robot_launch_arg = build_robot_launch_arg(robot_cfg=config.arena_cfg.robot)
         clearance = f"task.episode.spawn.robot_clearance:={config.arena_cfg.general.safety_distance}"
-        per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", clearance, robot_launch_arg] for _ in range(n_envs)]
+        per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", robot_launch_arg, clearance, *([f"run_seed:={env_seed}-{i}"] if env_seed is not None else []), *(extra_args[i % len(extra_args)] if extra_args else [])] for i in range(n_envs)]
 
         with _stage(f"spawn_envs (n={n_envs})"):
             env_map = spawn_envs(n_envs, per_env_launch_args)
