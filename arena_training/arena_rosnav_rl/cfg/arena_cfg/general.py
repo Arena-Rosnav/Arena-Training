@@ -15,6 +15,8 @@ class GeneralCfg(BaseModel):
         observations_config (str): Path to the observations YAML config file.
         lockstep (bool): Gym-exact stepping via sim_lifecycle/step instead of lazy pause. Default is False.
         lockstep_step_seconds (float): Sim seconds advanced per gym step under lockstep. Default is 0.0999.
+        env_seed (int | None): Root of the episode seed stream, env i runs on run_seed "<env_seed>-<i>". None leaves it random.
+        env_launch_args (list[list[str]]): Extra launch args per env, env i takes entry i modulo the list length (e.g. world or humansim.local_planner).
     """
 
     debug_mode: bool = False
@@ -28,3 +30,5 @@ class GeneralCfg(BaseModel):
     lockstep: bool = False
     # Quantized to physics ticks server-side by sim_lifecycle/step.
     lockstep_step_seconds: float = Field(0.0999, gt=0)
+    env_seed: int | None = None
+    env_launch_args: list[list[str]] = Field(default_factory=list)

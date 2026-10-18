@@ -105,6 +105,8 @@ arena_cfg:
     safety_distance: 1.0  # Minimum distance to maintain from obstacles for safety
     show_progress_bar: false  # Display progress bar during training
     control_hz: 10.0  # Control frequency in Hz (wall-clock rate ≈ sim_realtime_factor × control_hz)
+    env_seed: null  # root of the per-env episode seed streams (run_seed "<env_seed>-<i>"), null = random
+    env_launch_args: []  # extra launch args per env, cycled, e.g. [[world:=office_1, humansim.local_planner:=orca]]
 
   # Logging levels for rosnav_rl subsystems and this trainer
   # default_level applies to the entire rosnav_rl.* namespace;
