@@ -279,6 +279,8 @@ class ArenaTrainer(ABC):
         parameters = self.config.agent_config.parameters.model_copy(
             update=dict(
                 laser_num_beams=robot_desc.laser.num_beams,
+                laser_angle_min=robot_desc.laser.angle.min,
+                laser_angle_increment=robot_desc.laser.angle.increment,
                 laser_max_range=robot_desc.laser.range,
                 min_linear_vel=linear[0],
                 max_linear_vel=linear[1],
