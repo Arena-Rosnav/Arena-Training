@@ -1,9 +1,8 @@
 import numpy as np
-from typing import List
-from rclpy.duration import Duration
 from geometry_msgs.msg import Twist
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from rclpy.duration import Duration
 from rosnav_rl.observations import DONE_REASONS
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
 def determine_termination(
@@ -62,7 +61,7 @@ def get_twist_from_action(action: np.ndarray) -> Twist:
     return twist
 
 
-def get_joint_trajectory_from_action(action: np.ndarray, joint_names: List[str], step_time: float = 0.1) -> JointTrajectory:
+def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str], step_time: float = 0.1) -> JointTrajectory:
     """
     Converts an action, joint names and step_time to a JointTrajectory message.
 
