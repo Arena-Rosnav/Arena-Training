@@ -1,3 +1,4 @@
+from pydantic import Field
 from rosnav_rl.model.stable_baselines3.cfg import CallbacksCfg
 
 
@@ -10,5 +11,4 @@ class TrainingCurriculumCfg:
 
 
 class ArenaCallbacksCfg(CallbacksCfg):
-    # training_curriculum configuration moved to task.staged section
-    pass
+    checkpoint_ticks: list[int] = Field(default_factory=list, description="Control ticks at which the model is saved as tick_<T>.zip.")

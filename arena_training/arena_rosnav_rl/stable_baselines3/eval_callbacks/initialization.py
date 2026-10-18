@@ -49,6 +49,15 @@ def _create_stop_training_callbacks(
     return [callback]
 
 
+def curriculum_stage_lists(task_cfg: TaskCfg) -> dict[str, list]:
+    """Curriculum stages as {parameter name: value per stage}."""
+    stages: dict[str, list] = {}
+    for stage in task_cfg.staged.curriculum_definition:
+        for param_name, param_value in stage.model_dump(by_alias=True, exclude_none=True).items():
+            stages.setdefault(param_name, []).append(param_value)
+    return stages
+
+
 def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
@@ -86,13 +95,8 @@ def init_sb3_callbacks(
     callbacks = []
 
     # Add curriculum callback if staging is enabled
-    if "staged" in tm_modules and task_cfg and task_cfg.staged and task_cfg.staged.curriculum_definition:
-        curriculum_stages = {}
-        for stage in task_cfg.staged.curriculum_definition:
-            stage_dict = stage.model_dump(by_alias=True, exclude_none=True)
-            for param_name, param_value in stage_dict.items():
-                curriculum_stages.setdefault(param_name, []).append(param_value)
-
+    if "staged" in tm_modules and task_cfg and task_cfg.staged and task_cfg.staged.curriculum_definition and task_cfg.staged.stage_ticks is None:
+        curriculum_stages = curriculum_stage_lists(task_cfg)
         if curriculum_stages:
             curriculum_cb = StagedTrainCallback(
                 node=node,

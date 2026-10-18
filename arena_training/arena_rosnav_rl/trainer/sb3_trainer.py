@@ -3,11 +3,13 @@ import time
 from dataclasses import dataclass
 from functools import partial
 
+from rosnav_rl.utils.stable_baselines3.tick_callbacks import TickCheckpointCallback, TickScheduledCurriculum
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from ...environments.wrappers import TimeSyncWrapper
 from ..cfg import sb3_cfg as arena_cfg
-from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
+from ..stable_baselines3.eval_callbacks.initialization import curriculum_stage_lists, init_sb3_callbacks
 from ..stable_baselines3.vec_wrapper import VecActionChunk
 from ..utils import paths as Paths
 from ..utils.env_factory import make_envs, sb3_wrap_env
@@ -233,6 +235,24 @@ class StableBaselines3Trainer(ArenaTrainer):
             train_max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
             eval_max_steps=self.config.arena_cfg.callbacks.periodic_evaluation.max_num_moves_per_eps,
         )
+        self.tick_callbacks: list[BaseCallback] = []
+        task_cfg = self.config.arena_cfg.task
+        if "staged" in task_cfg.tm_modules and task_cfg.staged is not None and task_cfg.staged.stage_ticks is not None:
+            self.tick_callbacks.append(
+                TickScheduledCurriculum(
+                    node=self._supervisor_node,
+                    train_stages=curriculum_stage_lists(task_cfg),
+                    stage_ticks=task_cfg.staged.stage_ticks,
+                    ticks_per_step=chunk,
+                    num_envs=self.config.arena_cfg.general.n_envs,
+                    parameter_node_template=task_cfg.staged.parameter_node_template,
+                    timeout=task_cfg.staged.timeout,
+                    verbose=1,
+                    tm_dict={"tm_robots": task_cfg.tm_robots, "tm_obstacles": task_cfg.tm_obstacles, "tm_modules": task_cfg.tm_modules},
+                )
+            )
+        if self.config.arena_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:
+            self.tick_callbacks.append(TickCheckpointCallback(self.paths[Paths.Agent].path, self.config.arena_cfg.callbacks.checkpoint_ticks, ticks_per_step=chunk))
 
     def _setup_monitoring(self) -> None:
         """Set up monitoring tools if not in debug mode."""
@@ -252,7 +272,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         self.agent.train(
             total_timesteps=max(steps - done, 0),
             reset_num_timesteps=not self.is_resume,
-            callback=self.eval_cb,
+            callback=CallbackList([self.eval_cb, *self.tick_callbacks]),
             progress_bar=self.config.agent_config.framework.algorithm.parameters.show_progress_bar,
         )
         self._save_model(checkpoint="last_model")

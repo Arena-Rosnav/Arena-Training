@@ -66,6 +66,10 @@ class StagedCfg(BaseModel):
     )
     upper_threshold: float = Field(default=0.9, description="Performance threshold to advance to next stage")
     lower_threshold: float = Field(default=0.3, description="Performance threshold to stay at current stage")
+    stage_ticks: list[int] | None = Field(
+        default=None,
+        description="Control tick at which each stage starts (first 0). Set, it replaces the performance thresholds and starting_stage.",
+    )
 
     # ROS2 parameter communication settings
     parameter_node_template: str = Field(
