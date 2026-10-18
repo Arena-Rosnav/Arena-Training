@@ -4,21 +4,19 @@ import posixpath
 import threading
 import time
 from abc import ABC
-from typing import Any, List, Tuple
+from typing import Any
 
 import arena_robots.Robot
 import gymnasium
 import numpy as np
 import rclpy
 import yaml
+from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
 from geometry_msgs.msg import Twist
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from rcl_interfaces.srv import GetParameters as GetParametersSrv
 from rclpy.client import Client
 from rclpy.task import Future
-from rclpy.time import Time
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -34,13 +32,13 @@ from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from task_generator_msgs.srv import ResetEpisode
-from arena_rclpy_mixins.Time import Time
+from trajectory_msgs.msg import JointTrajectory
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
-    get_twist_from_action,
     get_joint_trajectory_from_action,
+    get_twist_from_action,
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
@@ -436,7 +434,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Decodes the given action using the model space encoder."""
         return self._model_space_manager.decode_action(action)
 
-    def _decode_split_action(self, action: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+    def _decode_split_action(self, action: np.ndarray) -> list[tuple[str, np.ndarray]]:
         """Decode action into typed sub-actions."""
         return self._model_space_manager.decode_split_action(action)
 

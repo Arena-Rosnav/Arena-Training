@@ -1,9 +1,10 @@
+from typing import Any
+
 import arena_robots.Robot
+from arena_robots.assembly import RequestPart
 from arena_robots.caps import MobileSpec, RobotCaps
 from arena_robots.Robot import RobotView
-from arena_robots.assembly import RequestPart
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, Dict, List
 
 
 class RobotCfg(BaseModel):
@@ -14,8 +15,8 @@ class RobotCfg(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
-    parts: Dict[str, List[Any]] = Field(default_factory=dict, description="Slot-to-part assembly mapping")
-    frames: Dict[str, str] = Field(default_factory=dict, description="frame overrides")
+    parts: dict[str, list[Any]] = Field(default_factory=dict, description="Slot-to-part assembly mapping")
+    frames: dict[str, str] = Field(default_factory=dict, description="frame overrides")
 
     robot_description: MobileSpec | None = Field(
         None,

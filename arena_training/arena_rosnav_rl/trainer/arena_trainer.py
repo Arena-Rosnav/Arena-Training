@@ -242,7 +242,7 @@ class ArenaTrainer(ABC):
         :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
         directly from the robot description and arena config.
         """
-        from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, OmnidirectionalActionSpace, ManipulatorActionSpace, CompositeActionSpace
+        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, DifferentialDriveActionSpace, ManipulatorActionSpace, OmnidirectionalActionSpace
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -265,7 +265,7 @@ class ArenaTrainer(ABC):
 
         arms = caps.arm
         if arms:
-            for mount_name, arm_spec in arms.items():
+            for _mount_name, arm_spec in arms.items():
                 arm_action_space = ManipulatorActionSpace.from_config(arm_spec)
                 action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
 
