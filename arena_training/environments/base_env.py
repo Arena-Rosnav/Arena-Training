@@ -192,6 +192,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self.__observations_config_path = observations_config
 
         self._steps_curr_episode = 0
+        self._episode_reward_terms: dict[str, float] = {}
         self._episode = 0
         self._max_steps_per_episode = max_steps_per_episode
         self.__is_first_step = True
@@ -503,10 +504,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         # Use string comparison as a fallback because the task_generator may store
         # the collision reason as str(DONE_REASONS.COLLISION) rather than the enum.
         reward, done = suppress_grace_collision(self._steps_curr_episode, reward, done, info, self._reward_function)
+        for term, value in self._reward_function.state.reward_overview.items():
+            self._episode_reward_terms[term] = self._episode_reward_terms.get(term, 0.0) + value
         obs_dict["is_terminal"] = done
         self.__is_first_step = False
 
         if done:
+            info["reward_terms"] = dict(self._episode_reward_terms)
             done_reason = info.get("done_reason", "unknown")
             is_success = info.get("is_success", False)
             episode_id = self._latest_episode.episode_id if self._latest_episode else self._episode
@@ -549,6 +553,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         try:
             steps_this_episode = self._steps_curr_episode
             self._steps_curr_episode = 0
+            self._episode_reward_terms = {}
             self.__is_first_step = True
 
             if not self._first_reset_done:
