@@ -8,6 +8,7 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 from ...environments.wrappers import TimeSyncWrapper
 from ..cfg import sb3_cfg as arena_cfg
 from ..stable_baselines3.eval_callbacks.initialization import init_sb3_callbacks
+from ..stable_baselines3.vec_wrapper import VecActionChunk
 from ..utils import paths as Paths
 from ..utils.env_factory import make_envs, sb3_wrap_env
 from ..utils.monitoring import setup_wandb
@@ -196,6 +197,18 @@ class StableBaselines3Trainer(ArenaTrainer):
         )
         _init_log.debug("sb3_wrap_env done in %.1fs", time.monotonic() - t0)
 
+        chunk = self.config.agent_config.action_chunk
+        if chunk > 1:
+            gamma = self.config.agent_config.framework.algorithm.parameters.gamma
+            env = VecActionChunk(env, horizon=chunk, gamma=gamma)
+            _init_log.info(
+                "action chunk %d: total_timesteps, eval_freq and max steps count control ticks, the policy decides every %d ticks with gamma %.4f per decision (%.4f per tick)",
+                chunk,
+                chunk,
+                gamma**chunk,
+                gamma,
+            )
+
         t0 = time.monotonic()
         env = self.agent.model.setup_environment(env)
         _init_log.debug("agent.model.setup_environment done in %.1fs", time.monotonic() - t0)
@@ -203,12 +216,16 @@ class StableBaselines3Trainer(ArenaTrainer):
 
     def _setup_callbacks(self, environment: SB3Environment) -> None:
         """Initialize training callbacks."""
+        callback_cfg = self.config.arena_cfg.callbacks
+        chunk = self.config.agent_config.action_chunk
+        if chunk > 1 and callback_cfg.periodic_evaluation is not None:
+            callback_cfg = callback_cfg.model_copy(update={"periodic_evaluation": callback_cfg.periodic_evaluation.model_copy(update={"eval_freq": max(1, callback_cfg.periodic_evaluation.eval_freq // chunk)})})
         self.eval_cb = init_sb3_callbacks(
             node=self._supervisor_node,
             eval_env=environment.eval_env,
             n_envs=self.config.arena_cfg.general.n_envs,
             tm_modules=self.config.arena_cfg.task.tm_modules,
-            callback_cfg=self.config.arena_cfg.callbacks,
+            callback_cfg=callback_cfg,
             task_cfg=self.config.arena_cfg.task,
             model_save_path=self.paths[Paths.Agent].path,
             eval_log_path=self.paths[Paths.AgentEval].path,
@@ -230,10 +247,10 @@ class StableBaselines3Trainer(ArenaTrainer):
 
     def _train_impl(self, *args: object, **kwargs: object) -> None:
         """Implementation of training logic."""
-        total = self.config.agent_config.framework.algorithm.parameters.total_timesteps
+        steps = self.config.agent_config.framework.algorithm.parameters.total_timesteps // self.config.agent_config.action_chunk
         done = self.agent.model.model.num_timesteps if self.is_resume else 0
         self.agent.train(
-            total_timesteps=max(total - done, 0),
+            total_timesteps=max(steps - done, 0),
             reset_num_timesteps=not self.is_resume,
             callback=self.eval_cb,
             progress_bar=self.config.agent_config.framework.algorithm.parameters.show_progress_bar,

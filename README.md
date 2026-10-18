@@ -65,6 +65,8 @@ All launch args (`sim`, `world`, `robot`, `robot.mobile`, `robot.mobile.agent`, 
 
 Gym steps are paced on the sim clock at `arena_cfg.general.control_hz`. With `arena_cfg.general.lockstep: true` the envs hold the sim instead and a gym step advances it by `arena_cfg.general.lockstep_step_seconds` through `/arena/sim_lifecycle/step`. With several envs every env's action is applied, the sim is stepped once and then every env observes, in the SB3 vec env and in the DreamerV3 `simulate` loop alike.
 
+`agent_config.action_chunk: H` (SB3 only) makes the policy emit H commands per decision, run one per control tick by `VecActionChunk`. `total_timesteps`, `eval_freq` and `max_num_moves_per_eps` stay in control ticks, PPO discounts with gamma^H and gae_lambda^H per decision, and an env whose episode ends inside a chunk idles for the rest of it. The inference node plays a chunk out the same way.
+
 `arena train` is sugar for `arena feature training launch ...`. You can visualize the running simulation via `arena viz --all`.
 
 See [`arena_bringup`](../arena_bringup) for all available launch arguments. For agent, observation space, reward and curriculum configuration refer to the [rosnav_rl README](deps/rosnav_rl/README.md).

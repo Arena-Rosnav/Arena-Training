@@ -9,6 +9,7 @@ agent_config:
   # Use 'type: differential_drive' or 'type: omnidirectional' for an explicit
   # override; set to null to derive from the robot model automatically.
   action_space: null
+  action_chunk: 1  # commands per policy decision, executed one per control tick (budget, gamma and eval_freq stay in ticks)
 
   framework:
     name: stable_baselines3  # ML framework name used for training
