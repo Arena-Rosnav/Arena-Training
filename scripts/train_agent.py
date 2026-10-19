@@ -23,6 +23,7 @@ import torch
 import rclpy
 
 # Import arena_training subpackages
+from arena_training.arena_rosnav_rl.cfg import RobotCfg
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
@@ -187,9 +188,7 @@ def main():
             config = load_training_config(str(config_path))
 
             if args.robot:
-                config.arena_cfg.robot.robot_model = args.robot
-                config.arena_cfg.robot.robot_description = None
-                config.arena_cfg.robot.model_post_init(None)
+                config.arena_cfg.robot = RobotCfg(robot_model=args.robot)
 
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
