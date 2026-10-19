@@ -20,6 +20,8 @@
   <exec_depend>rosnav_rl</exec_depend>
   <exec_depend>arena_runtime_msgs</exec_depend>
   <exec_depend>task_generator_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
