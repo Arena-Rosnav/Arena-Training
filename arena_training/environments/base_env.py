@@ -16,7 +16,9 @@ from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
 from geometry_msgs.msg import Twist
 from rclpy.client import Client
+from rclpy.publisher import Publisher
 from rclpy.task import Future
+from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -190,7 +192,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._initialize_agent_components(space_manager, reward_function)
         self.__agent_parameters = simulation_state_container
 
-        self._arm_joint_names = self._extract_arm_joint_names()
         self._last_step_time = None
         self._default_dt = 0.0999
         self._traj_min_dt: float = 1e-3
@@ -210,7 +211,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._reset_task_srv = None
         self._pause_srv = None
         self._cmd_vel_pub = None
-        self._joint_trajectory_pub = None
+        self._joint_trajectory_pubs: dict[str, Publisher] = {}
         self._episode_state_sub = None
         self._latest_episode: EpisodeRecord | None = None
         self._episode_event = threading.Event()
@@ -336,11 +337,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
         self.node.get_logger().info(f"Created direct cmd_vel publisher at: {cmd_vel_topic}")
 
-        # Direct JointTrajectory publisher, the sole source of joint trajectory commands
-        # druing training. Compeletly bypassing MoveIt
-        joint_trajectory_topic = self.robot_ns("arm_controller/joint_trajectory").to_string()
-        self._joint_trajectory_pub = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
-        self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
+        for arm in self._arm_specs():
+            joint_trajectory_topic = self.robot_ns(f"{arm.controller}/joint_trajectory").to_string()
+            self._joint_trajectory_pubs[arm.controller] = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
+            self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
 
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
         episode_topic = (self.env_ns / "state" / "episode").to_string()
@@ -435,22 +435,15 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Decodes the given action using the model space encoder."""
         return self._model_space_manager.decode_action(action)
 
-    def _decode_split_action(self, action: np.ndarray) -> list[tuple[str, np.ndarray]]:
-        """Decode action into typed sub-actions."""
+    def _decode_split_action(self, action: np.ndarray) -> list[tuple[BaseActionSpace, np.ndarray]]:
+        """Decode action into its sub-spaces and their commands."""
         return self._model_space_manager.decode_split_action(action)
 
-    def _extract_arm_joint_names(self) -> list[str]:
-        """Extracts arm joint names from the action space spec, handling composites."""
+    def _arm_specs(self) -> list[ManipulatorActionSpace]:
+        """The arm sub-spaces of the action space."""
         spec = self._model_space_manager.action_space_manager.spec
-
-        if getattr(spec, "type", None) == "arm":
-            return spec.joint_names
-
-        for sub_spec in getattr(spec, "action_spaces", []):
-            if sub_spec.type == "arm":
-                return sub_spec.joint_names
-
-        return []
+        specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
+        return [s for s in specs if isinstance(s, ManipulatorActionSpace)]
 
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
@@ -503,12 +496,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if not self._ready_event.is_set():
             self._ready_event.set()
 
-        for type_name, decoded in decoded_action:
-            if type_name == "omnidirectional" or type_name == "differential_drive":
+        dt = self._get_dt() if self._joint_trajectory_pubs else 0.0
+        for spec, decoded in decoded_action:
+            if isinstance(spec, ManipulatorActionSpace):
+                self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
+            elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
-            elif type_name == "arm":
-                self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(decoded, self._arm_joint_names, self._get_dt()))
 
     def step_sim(self) -> None:
         """Advances the held sim by one lockstep step."""
@@ -603,9 +597,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if self._cmd_vel_pub is not None:
             self._cmd_vel_pub.publish(Twist())
 
-        # Reset arm to stow position
-        if self._joint_trajectory_pub is not None:
-            self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, self._arm_joint_names))
+        for arm in self._arm_specs():
+            if arm.controller in self._joint_trajectory_pubs:
+                self._joint_trajectory_pubs[arm.controller].publish(get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, arm.joint_names))
 
         self._last_step_time = None
 
