@@ -263,18 +263,16 @@ class ArenaTrainer(ABC):
                 angular_range=angular,
             )
 
-        arms = caps.arm
-        if arms:
-            for _mount_name, arm_spec in arms.items():
-                arm_action_space = ManipulatorActionSpace.from_config(arm_spec)
-                action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
-
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
         discretization_cfg = self.config.agent_config.discretization
         if discretization_cfg is not None:
             action_space = action_space.model_copy(update={"discretization": discretization_cfg})
             action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete)
+
+        arm_spaces = [ManipulatorActionSpace.from_config(arm_spec) for arm_spec in (caps.arm or {}).values()]
+        if arm_spaces:
+            action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
 
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,
