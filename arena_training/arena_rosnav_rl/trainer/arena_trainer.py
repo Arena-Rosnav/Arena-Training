@@ -242,12 +242,10 @@ class ArenaTrainer(ABC):
         :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
         directly from the robot description and arena config.
         """
-        from rosnav_rl.cfg.action_spaces import (
-            DifferentialDriveActionSpace,
-            OmnidirectionalActionSpace,
-        )
+        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, DifferentialDriveActionSpace, ManipulatorActionSpace, OmnidirectionalActionSpace
 
         robot_cfg = self.config.arena_cfg.robot
+        caps = robot_cfg.effective_caps
         robot_desc = robot_cfg.robot_description
         general = self.config.arena_cfg.general
         linear, lateral, angular = action_ranges(robot_desc)
@@ -271,6 +269,10 @@ class ArenaTrainer(ABC):
         if discretization_cfg is not None:
             action_space = action_space.model_copy(update={"discretization": discretization_cfg})
             action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete)
+
+        arm_spaces = [ManipulatorActionSpace.from_config(arm_spec) for arm_spec in (caps.arm or {}).values()]
+        if arm_spaces:
+            action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
 
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,

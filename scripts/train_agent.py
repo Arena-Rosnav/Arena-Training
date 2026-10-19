@@ -23,6 +23,7 @@ import torch
 import rclpy
 
 # Import arena_training subpackages
+from arena_training.arena_rosnav_rl.cfg import RobotCfg
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
@@ -169,16 +170,15 @@ def main():
             config = load_training_config(str(config_path))
 
             if args.robot:
-                config.arena_cfg.robot.robot_model = args.robot
-                config.arena_cfg.robot.robot_description = None
-                config.arena_cfg.robot.model_post_init(None)
+                config.arena_cfg.robot = RobotCfg(robot_model=args.robot)
 
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
         env_seed = config.arena_cfg.general.env_seed
         extra_args = config.arena_cfg.general.env_launch_args
+        robot_launch_arg = config.arena_cfg.robot.launch_arg
         clearance = f"task.episode.spawn.robot_clearance:={config.arena_cfg.general.safety_distance}"
-        per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", clearance, *([f"run_seed:={env_seed}-{i}"] if env_seed is not None else []), *(extra_args[i % len(extra_args)] if extra_args else [])] for i in range(n_envs)]
+        per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", robot_launch_arg, clearance, *([f"run_seed:={env_seed}-{i}"] if env_seed is not None else []), *(extra_args[i % len(extra_args)] if extra_args else [])] for i in range(n_envs)]
 
         with _stage(f"spawn_envs (n={n_envs})"):
             env_map = spawn_envs(n_envs, per_env_launch_args)

@@ -1,6 +1,8 @@
 import arena_robots.Robot
-from arena_robots.caps import MobileSpec
-from pydantic import BaseModel, ConfigDict, Field
+from arena_robots.assembly import RequestPart
+from arena_robots.caps import MobileSpec, RobotCaps
+from arena_robots.Robot import RobotView
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RobotCfg(BaseModel):
@@ -10,17 +12,40 @@ class RobotCfg(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
+    parts: dict[str, list[RequestPart]] = Field(default_factory=dict, description="Slot-to-part assembly mapping")
+    frames: dict[str, str] = Field(default_factory=dict, description="frame overrides")
+
     robot_description: MobileSpec | None = Field(
         None,
         alias="Robot Yaml Description",
         exclude=True,
     )
 
+    view: RobotView | None = Field(None, description="The fully resolved robot capabilities view", exclude=True)
+    effective_caps: RobotCaps | None = Field(None, description="Resolved effective capabilities", exclude=True)
+
+    @field_validator("parts", mode="before")
+    @classmethod
+    def _parse_parts(cls, value: dict[str, list[dict | RequestPart]]) -> dict[str, list[RequestPart]]:
+        return {category: [RequestPart(**item) if isinstance(item, dict) else item for item in items] for category, items in value.items()}
+
+    @property
+    def launch_arg(self) -> str:
+        """The ``robot:=`` launch argument requesting this model with its parts."""
+        requests = [f"{part.mount}={category}/{part.variant}" if part.mount else f"{category}={part.variant}" for category, parts in self.parts.items() for part in parts]
+        return f"robot:={self.robot_model}[{','.join(requests)}]" if requests else f"robot:={self.robot_model}"
+
     def model_post_init(self, context: object, /) -> None:
+        if self.view is None:
+            resolved_view = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync()
+            caps = resolved_view.effective_caps(parts=self.parts, frames=self.frames or None)
+
+            object.__setattr__(self, "effective_caps", caps)
+            object.__setattr__(self, "view", resolved_view)
+
         if self.robot_description is None:
-            mobile = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync().mobile
+            mobile = self.view.mobile
             if mobile is None:
                 raise ValueError(f"robot '{self.robot_model}' does not advertise a 'mobile' cap, RobotCfg requires caps/mobile.yaml")
             object.__setattr__(self, "robot_description", mobile)
