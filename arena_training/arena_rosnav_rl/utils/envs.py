@@ -62,26 +62,12 @@ def get_twist_from_action(action: np.ndarray) -> Twist:
 
 
 def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str], step_time: float = 0.1) -> JointTrajectory:
-    """
-    Converts an action, joint names and step_time to a JointTrajectory message.
-
-    Args:
-        action (np.ndarray): The action array containing the target positions.
-        joint_names (List[str]): The list containing the joint names.
-        step time (float): Time between steps.
-
-    Returns:
-        JointTrajectory: A JointTrajectory message with taeget positions.
-    """
-
-    jointTrajectory = JointTrajectory()
-    jointTrajectory.joint_names = joint_names
+    """One-point trajectory reaching the target joint positions after step_time seconds."""
     point = JointTrajectoryPoint()
     point.positions = action.tolist()
-
     sec = int(step_time)
-    nanosec = int((step_time - sec) * 1e9)
-    point.time_from_start = Duration(seconds=sec, nanoseconds=nanosec).to_msg()
-
-    jointTrajectory.points.append(point)
-    return jointTrajectory
+    point.time_from_start = Duration(seconds=sec, nanoseconds=int((step_time - sec) * 1e9)).to_msg()
+    trajectory = JointTrajectory()
+    trajectory.joint_names = joint_names
+    trajectory.points.append(point)
+    return trajectory
