@@ -44,7 +44,6 @@ from arena_training.arena_rosnav_rl.utils.envs import (
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
-_ARM_STOW_POSITIONS = np.array([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], dtype=np.float32)
 _STEP_WINDOW_REFUSAL = "no open unpause window"
 _STEP_WINDOW_WAIT = 60.0
 _GRACE_STEPS = 3
@@ -598,8 +597,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._cmd_vel_pub.publish(Twist())
 
         for arm in self._arm_specs():
-            if arm.controller in self._joint_trajectory_pubs:
-                self._joint_trajectory_pubs[arm.controller].publish(get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, arm.joint_names))
+            if arm.stow_positions is not None and arm.controller in self._joint_trajectory_pubs:
+                self._joint_trajectory_pubs[arm.controller].publish(get_joint_trajectory_from_action(np.asarray(arm.stow_positions), arm.joint_names))
 
         self._last_step_time = None
 
