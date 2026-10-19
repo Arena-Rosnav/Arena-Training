@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum, auto
 from functools import wraps
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, Concatenate, TypeVar
 
 from typing_extensions import ParamSpec
 
@@ -49,7 +49,7 @@ class HookManager:
     def __init__(self):
         self.__hooks: dict[TrainingHookStages, list[Callable]] = {stage: [] for stage in TrainingHookStages}
 
-    def register(self, stage: TrainingHookStages, callback: Callable) -> None:
+    def register(self, stage: TrainingHookStages, callback: Callable | list[Callable]) -> None:
         """Register a callback for a specific hook stage."""
         if type(stage) is not TrainingHookStages:
             raise TypeError(f"Invalid stage type: {type(stage)} is not a 'TrainingHookStages'!")
@@ -66,10 +66,10 @@ class HookManager:
             callback(context)
 
 
-def bind_hooks(before_stage: TrainingHookStages = None, after_stage: TrainingHookStages = None) -> Callable[[Callable[P, T]], Callable[P, T]]:
+def bind_hooks(before_stage: TrainingHookStages | None = None, after_stage: TrainingHookStages | None = None) -> Callable[[Callable[Concatenate[ArenaTrainer, P], T]], Callable[Concatenate[ArenaTrainer, P], T]]:
     """Decorator to run hooks before and/or after method execution."""
 
-    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+    def decorator(func: Callable[Concatenate[ArenaTrainer, P], T]) -> Callable[Concatenate[ArenaTrainer, P], T]:
         @wraps(func)
         def wrapper(self: ArenaTrainer, *args: P.args, **kwargs: P.kwargs) -> T:
             if before_stage:

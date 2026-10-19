@@ -4,11 +4,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import rosnav_rl
 import rosnav_rl.model.dreamerv3 as dreamerv3
 from rosnav_rl import SupportedRLFrameworks
+from rosnav_rl.model.dreamerv3.cfg import DreamerV3Cfg
+from rosnav_rl.model.dreamerv3.envs.wrappers import DreamerEnv
 
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
@@ -46,7 +48,7 @@ class DreamerV3Environment:
                 pass
 
 
-class DreamerV3Trainer(ArenaTrainer):
+class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
     """Trainer for DreamerV3 reinforcement learning framework.
 
     Handles agent setup, environment configuration, and training
@@ -71,7 +73,7 @@ class DreamerV3Trainer(ArenaTrainer):
                 run_name=self.config.agent_config.name,
                 group=self.config.arena_cfg.monitoring.wandb.group,
                 config=self.config,
-                to_watch=[self.agent.model.model],
+                to_watch=[self._dreamer()],
                 agent_id=self.config.agent_config.name,
             )
 
@@ -85,7 +87,7 @@ class DreamerV3Trainer(ArenaTrainer):
         from ..utils import paths as Paths
 
         # Ensure logdir is set before DreamerV3Model.__init__ runs
-        fw_cfg = self.config.agent_config.framework
+        fw_cfg = self._framework_cfg()
         if fw_cfg.general.logdir is None:
             fw_cfg.general.logdir = str(self.paths[Paths.Agent].path)
 
@@ -140,10 +142,10 @@ class DreamerV3Trainer(ArenaTrainer):
         )
 
         if general_cfg.debug_mode:
-            train_envs = [dreamerv3.Damy(init_fnc()) for init_fnc in train_env_fncs]
+            train_envs = [dreamerv3.Damy(cast(DreamerEnv, init_fnc())) for init_fnc in train_env_fncs]
         else:
             # Capture via default argument to avoid late-binding closure bug
-            train_envs = [dreamerv3.Parallel(lambda _f=fnc: _f(), "daemon") for fnc in train_env_fncs]
+            train_envs = [dreamerv3.Parallel(lambda _f=fnc: cast(DreamerEnv, _f()), "daemon") for fnc in train_env_fncs]
         # Shared envs for train and eval (same pattern as SB3 trainer)
         self.environment = DreamerV3Environment(train_envs=train_envs, eval_envs=train_envs)
         self._setup_curriculum()
@@ -161,9 +163,11 @@ class DreamerV3Trainer(ArenaTrainer):
             return
 
         general_cfg = self.config.arena_cfg.general
+        staged = task_cfg.staged
+        assert staged is not None
         self._curriculum = DreamerV3Curriculum(
             node=self.node,
-            staged_cfg=task_cfg.staged,
+            staged_cfg=staged,
             num_envs=general_cfg.n_envs,
             verbose=int(general_cfg.verbose),
             tm_dict={
@@ -172,7 +176,6 @@ class DreamerV3Trainer(ArenaTrainer):
                 "tm_modules": task_cfg.tm_modules,
             },
         )
-        staged = task_cfg.staged
         logger.info(
             "[Setup] Curriculum learning enabled, %d stages, threshold_type=%s, advance>=%.2f, retreat<=%.2f",
             len(staged.curriculum_definition),
@@ -194,7 +197,7 @@ class DreamerV3Trainer(ArenaTrainer):
 
     def _train_impl(self, *args: object, **kwargs: object):
         """Run the DreamerV3 training loop via the model's own train() method."""
-        fw_cfg = self.config.agent_config.framework
+        fw_cfg = self._framework_cfg()
         logger.info(
             "[Train] Starting DreamerV3 training, total_steps=%d  eval_every=%d  batch=%dx%d  device=%s",
             fw_cfg.training.steps,
@@ -209,3 +212,13 @@ class DreamerV3Trainer(ArenaTrainer):
             after_eval_fn=self._curriculum.after_eval_hook if self._curriculum else None,
         )
         logger.info("[Train] Training complete.")
+
+    def _framework_cfg(self) -> DreamerV3Cfg:
+        framework = self.config.agent_config.framework
+        assert isinstance(framework, DreamerV3Cfg)
+        return framework
+
+    def _dreamer(self) -> dreamerv3.Dreamer:
+        dreamer = self.agent.model.model
+        assert isinstance(dreamer, dreamerv3.Dreamer)
+        return dreamer

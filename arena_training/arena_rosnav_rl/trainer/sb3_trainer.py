@@ -3,7 +3,10 @@ import time
 from dataclasses import dataclass
 from functools import partial
 
+from rosnav_rl.model.stable_baselines3 import StableBaselinesModel
+from rosnav_rl.model.stable_baselines3.cfg import StableBaselinesCfg
 from rosnav_rl.utils.stable_baselines3.tick_callbacks import TickCheckpointCallback, TickScheduledCurriculum
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
@@ -36,7 +39,7 @@ class SB3Environment:
             self.eval_env.close()
 
 
-class StableBaselines3Trainer(ArenaTrainer):
+class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
     """
     StableBaselines3Trainer class for managing RL training with the Stable Baselines 3 framework.
 
@@ -90,7 +93,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
 
         def _transfer_weights(_: ArenaTrainer | None):
-            transfer_cfg = self.config.agent_config.framework.algorithm.transfer_weights
+            transfer_cfg = self._framework_cfg().algorithm.transfer_weights
             if transfer_cfg:
                 self.agent.model.transfer_weights(
                     source_dir=transfer_cfg.source_dir,
@@ -104,7 +107,7 @@ class StableBaselines3Trainer(ArenaTrainer):
             [_transfer_weights],
         )
 
-    def _setup_agent(self) -> None:
+    def _setup_agent(self, *args: object, **kwargs: object) -> None:
         """Initializes the reinforcement learning agent.
 
         This method creates an instance of the RL_Agent class using the
@@ -120,7 +123,7 @@ class StableBaselines3Trainer(ArenaTrainer):
         self.agent = rosnav_rl.RL_Agent(self.config.agent_config)
         _init_log.debug("RL_Agent ready in %.1fs", time.monotonic() - t0)
 
-    def _setup_environment(self) -> None:
+    def _setup_environment(self, *args: object, **kwargs: object) -> None:
         """Sets up the training environment.
 
         This method performs the following steps:
@@ -201,7 +204,7 @@ class StableBaselines3Trainer(ArenaTrainer):
 
         chunk = self.config.agent_config.action_chunk
         if chunk > 1:
-            gamma = self.config.agent_config.framework.algorithm.parameters.gamma
+            gamma = self._framework_cfg().algorithm.parameters.gamma
             env = VecActionChunk(env, horizon=chunk, gamma=gamma)
             _init_log.info(
                 "action chunk %d: total_timesteps, eval_freq and max steps count control ticks, the policy decides every %d ticks with gamma %.4f per decision (%.4f per tick)",
@@ -212,13 +215,17 @@ class StableBaselines3Trainer(ArenaTrainer):
             )
 
         t0 = time.monotonic()
-        env = self.agent.model.setup_environment(env)
+        env = self._sb3_model().setup_environment(env)
         _init_log.debug("agent.model.setup_environment done in %.1fs", time.monotonic() - t0)
         self.environment = SB3Environment(train_env=env, eval_env=env)
 
     def _setup_callbacks(self, environment: SB3Environment) -> None:
         """Initialize training callbacks."""
-        callback_cfg = self.config.arena_cfg.callbacks
+        arena_sb3_cfg = self._arena_sb3_cfg()
+        callback_cfg = arena_sb3_cfg.callbacks
+        if callback_cfg.periodic_evaluation is None:
+            raise ValueError("callbacks.periodic_evaluation is required, the shared-env eval callback runs on it.")
+        eval_max_steps = callback_cfg.periodic_evaluation.max_num_moves_per_eps
         chunk = self.config.agent_config.action_chunk
         if chunk > 1 and callback_cfg.periodic_evaluation is not None:
             callback_cfg = callback_cfg.model_copy(update={"periodic_evaluation": callback_cfg.periodic_evaluation.model_copy(update={"eval_freq": max(1, callback_cfg.periodic_evaluation.eval_freq // chunk)})})
@@ -229,11 +236,11 @@ class StableBaselines3Trainer(ArenaTrainer):
             tm_modules=self.config.arena_cfg.task.tm_modules,
             callback_cfg=callback_cfg,
             task_cfg=self.config.arena_cfg.task,
-            model_save_path=self.paths[Paths.Agent].path,
-            eval_log_path=self.paths[Paths.AgentEval].path,
+            model_save_path=str(self.paths[Paths.Agent].path),
+            eval_log_path=str(self.paths[Paths.AgentEval].path),
             debug_mode=self.config.arena_cfg.general.debug_mode,
             train_max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
-            eval_max_steps=self.config.arena_cfg.callbacks.periodic_evaluation.max_num_moves_per_eps,
+            eval_max_steps=eval_max_steps,
         )
         self.tick_callbacks: list[BaseCallback] = []
         task_cfg = self.config.arena_cfg.task
@@ -251,29 +258,30 @@ class StableBaselines3Trainer(ArenaTrainer):
                     tm_dict={"tm_robots": task_cfg.tm_robots, "tm_obstacles": task_cfg.tm_obstacles, "tm_modules": task_cfg.tm_modules},
                 )
             )
-        if self.config.arena_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:
-            self.tick_callbacks.append(TickCheckpointCallback(self.paths[Paths.Agent].path, self.config.arena_cfg.callbacks.checkpoint_ticks, ticks_per_step=chunk))
+        if arena_sb3_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:
+            self.tick_callbacks.append(TickCheckpointCallback(self.paths[Paths.Agent].path, arena_sb3_cfg.callbacks.checkpoint_ticks, ticks_per_step=chunk))
 
-    def _setup_monitoring(self) -> None:
+    def _setup_monitoring(self, *args: object, **kwargs: object) -> None:
         """Set up monitoring tools if not in debug mode."""
         if not self.config.arena_cfg.general.debug_mode and self.config.arena_cfg.monitoring is not None and self.config.arena_cfg.monitoring.wandb is not None and self.config.arena_cfg.monitoring.wandb.enabled:
             setup_wandb(
                 run_name=self.config.agent_config.name,
-                group=self.config.agent_config.framework.algorithm.architecture_name,
+                group=self._framework_cfg().algorithm.architecture_name,
                 config=self.config,
-                to_watch=[self.agent.model.model.policy],
+                to_watch=[self._sb3_algorithm().policy],
                 agent_id=self.config.agent_config.name,
             )
 
     def _train_impl(self, *args: object, **kwargs: object) -> None:
         """Implementation of training logic."""
-        steps = self.config.agent_config.framework.algorithm.parameters.total_timesteps // self.config.agent_config.action_chunk
-        done = self.agent.model.model.num_timesteps if self.is_resume else 0
+        algorithm_cfg = self._framework_cfg().algorithm
+        steps = algorithm_cfg.parameters.total_timesteps // self.config.agent_config.action_chunk
+        done = self._sb3_algorithm().num_timesteps if self.is_resume else 0
         self.agent.train(
             total_timesteps=max(steps - done, 0),
             reset_num_timesteps=not self.is_resume,
             callback=CallbackList([self.eval_cb, *self.tick_callbacks]),
-            progress_bar=self.config.agent_config.framework.algorithm.parameters.show_progress_bar,
+            progress_bar=algorithm_cfg.parameters.show_progress_bar,
         )
         self._save_model(checkpoint="last_model")
 
@@ -296,7 +304,12 @@ class StableBaselines3Trainer(ArenaTrainer):
         """
 
         tensorboard_log_path = self.paths[Paths.AgentTensorboard].path if not self.config.arena_cfg.general.debug_mode else None
-        checkpoint_path = None if not self.is_resume else self.paths[Paths.Agent].path / self.config.agent_config.framework.algorithm.checkpoint
+        checkpoint_path = None
+        if self.is_resume:
+            checkpoint = self._framework_cfg().algorithm.checkpoint
+            if checkpoint is None:
+                raise ValueError("Checkpoint must be provided for resume!")
+            checkpoint_path = self.paths[Paths.Agent].path / checkpoint
 
         self.agent.initialize_model(
             env=train_env,
@@ -304,4 +317,24 @@ class StableBaselines3Trainer(ArenaTrainer):
             tensorboard_log_path=tensorboard_log_path,
             checkpoint_path=checkpoint_path,
         )
-        self.agent.model.environment = train_env
+        self._sb3_model().environment = train_env
+
+    def _arena_sb3_cfg(self) -> arena_cfg.ArenaSB3Cfg:
+        cfg = self.config.arena_cfg
+        assert isinstance(cfg, arena_cfg.ArenaSB3Cfg)
+        return cfg
+
+    def _framework_cfg(self) -> StableBaselinesCfg:
+        framework = self.config.agent_config.framework
+        assert isinstance(framework, StableBaselinesCfg)
+        return framework
+
+    def _sb3_model(self) -> StableBaselinesModel:
+        model = self.agent.model
+        assert isinstance(model, StableBaselinesModel)
+        return model
+
+    def _sb3_algorithm(self) -> BaseAlgorithm:
+        algorithm = self._sb3_model().model
+        assert isinstance(algorithm, BaseAlgorithm)
+        return algorithm

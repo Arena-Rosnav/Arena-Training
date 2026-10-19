@@ -26,7 +26,7 @@ class ProfilingVecEnv(VecEnvWrapper):
         profile_reset: bool = True,
         per_call: bool = True,
         print_stats: bool = True,
-        log_file: str = None,
+        log_file: str | None = None,
         enable_subscribers: bool = True,
     ):
         super().__init__(env)

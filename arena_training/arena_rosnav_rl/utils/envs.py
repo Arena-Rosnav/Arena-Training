@@ -9,7 +9,7 @@ def determine_termination(
     reward_info: dict,
     curr_steps: int,
     max_steps: int,
-    info: dict = None,
+    info: dict | None = None,
 ) -> tuple[dict, bool]:
     """
     Determine if the episode should terminate.
@@ -69,5 +69,5 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str],
     point.time_from_start = Duration(sec=sec, nanosec=int((step_time - sec) * 1e9))
     trajectory = JointTrajectory()
     trajectory.joint_names = joint_names
-    trajectory.points.append(point)
+    trajectory.points = [point]
     return trajectory

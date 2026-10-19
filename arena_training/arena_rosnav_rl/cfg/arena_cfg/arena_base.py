@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ValidationInfo, field_validator
+from pydantic import BaseModel
 from rosnav_rl.cfg.logging import LoggingCfg
 
 from .general import GeneralCfg
@@ -9,26 +9,9 @@ from .task import TaskCfg
 
 
 class ArenaBaseCfg(BaseModel):
-    general: GeneralCfg | None = GeneralCfg()
+    general: GeneralCfg = GeneralCfg()
     logging: LoggingCfg | None = LoggingCfg()
-    monitoring: MonitoringCfg | None = MonitoringCfg()
-    task: TaskCfg | None = TaskCfg()
+    monitoring: MonitoringCfg = MonitoringCfg()
+    task: TaskCfg = TaskCfg()
     profiling: ProfilingCfg | None = None
-    robot: RobotCfg | None = RobotCfg()
-
-    @field_validator(
-        "general",
-        "monitoring",
-        "task",
-        "robot",
-        mode="after",
-    )
-    @classmethod
-    def check_attr_none(
-        cls,
-        v: GeneralCfg | MonitoringCfg | TaskCfg | RobotCfg | None,
-        values: ValidationInfo,
-    ) -> GeneralCfg | MonitoringCfg | TaskCfg | RobotCfg:
-        if v is None:
-            raise ValueError(f"{v} cannot be None")
-        return v
+    robot: RobotCfg = RobotCfg()

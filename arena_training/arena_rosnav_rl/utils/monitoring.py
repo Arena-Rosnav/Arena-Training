@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 
 
 def setup_wandb(
-    run_name: str = None,
-    group: str = None,
-    config: "TrainingCfg" = None,
-    agent_id: str = None,
+    config: "TrainingCfg",
+    run_name: str | None = None,
+    group: str | None = None,
+    agent_id: str | None = None,
     to_watch: list[torch.nn.Module] | None = None,
 ) -> None:
     """Set up Weights and Biases (wandb) for training tracking."""

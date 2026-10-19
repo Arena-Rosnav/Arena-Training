@@ -2,6 +2,8 @@ import logging
 import multiprocessing as mp
 import time
 import warnings
+from multiprocessing.connection import Connection
+from multiprocessing.process import BaseProcess
 from typing import Any, Callable
 
 import gymnasium as gym
@@ -16,8 +18,8 @@ _JOIN_TIMEOUT_S = 5.0
 
 
 def _worker(
-    remote: mp.connection.Connection,
-    parent_remote: mp.connection.Connection,
+    remote: Connection,
+    parent_remote: Connection,
     env_fn_wrapper: CloudpickleWrapper,
     worker_idx: int = -1,
 ) -> None:
@@ -47,6 +49,7 @@ def _worker(
     _init_log.info(f"{_tag} env constructed, awaiting commands")
     reset_info: dict[str, Any] | None = {}
     while True:
+        cmd = None
         try:
             cmd, data = remote.recv()
             if cmd == "step":
@@ -77,12 +80,12 @@ def _worker(
             elif cmd == "get_attr":
                 remote.send(env.get_wrapper_attr(data))
             elif cmd == "set_attr":
-                remote.send(setattr(env, data[0], data[1]))  # type: ignore[func-returns-value]
+                remote.send(setattr(env, data[0], data[1]))
             elif cmd == "is_wrapped":
                 remote.send(is_wrapped(env, data))
             elif cmd == "init":
                 t0 = time.monotonic()
-                result = env._initialize_environment()
+                result = env.get_wrapper_attr("_initialize_environment")()
                 _init_log.info(f"{_tag} init done in {time.monotonic() - t0:.1f}s")
                 remote.send(result)
             else:
@@ -125,8 +128,8 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
         self._ctx = mp.get_context(start_method)
         self._env_fns = env_fns
 
-        self.remotes: list[mp.connection.Connection] = []
-        self.processes: list[mp.process.BaseProcess] = []
+        self.remotes: list[Connection] = []
+        self.processes: list[BaseProcess] = []
         self._restarted: dict[int, tuple[Any, float, bool, dict[str, Any], dict[str, Any]]] = {}
         self._episode_steps = [0] * n_envs
         for idx in range(n_envs):
@@ -200,9 +203,10 @@ class DelayedSubprocVecEnv(SubprocVecEnv):
                 result = self._restart_worker(idx)
             results.append(result)
         self.waiting = False
-        obs, rews, dones, infos, self.reset_infos = zip(*results, strict=True)
+        obs, rews, dones, infos, reset_infos = zip(*results, strict=True)
+        self.reset_infos = list(reset_infos)
         self._episode_steps = [0 if done else n + 1 for n, done in zip(self._episode_steps, dones, strict=True)]
-        return _stack_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
+        return _stack_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), list(infos)
 
     def _call_or_restart(self, idx: int, method: str, *args: Any) -> bool:
         """Call an env method on one worker, False when the worker was dead and got restarted instead."""
