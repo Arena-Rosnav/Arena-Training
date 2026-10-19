@@ -52,6 +52,7 @@ def _create_stop_training_callbacks(
 def curriculum_stage_lists(task_cfg: TaskCfg) -> dict[str, list]:
     """Curriculum stages as {parameter name: value per stage}."""
     stages: dict[str, list] = {}
+    assert task_cfg.staged is not None
     for stage in task_cfg.staged.curriculum_definition:
         for param_name, param_value in stage.model_dump(by_alias=True, exclude_none=True).items():
             stages.setdefault(param_name, []).append(param_value)
@@ -62,7 +63,7 @@ def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
     n_envs: int,
-    tm_modules: list[str],
+    tm_modules: str,
     model_save_path: str,
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
@@ -78,7 +79,7 @@ def init_sb3_callbacks(
         node: ROS2 supervisor node
         eval_env (VecEnv): The evaluation environment.
         n_envs (int): Number of environments.
-        tm_modules (List[str]): List of training modules.
+        tm_modules (str): Task modules the task generator runs.
         model_save_path (str): Path to save the model.
         eval_log_path (str): Path to save evaluation logs.
         callback_cfg (CallbacksCfg): Configuration for callbacks.
@@ -90,6 +91,8 @@ def init_sb3_callbacks(
     # Extract configuration variables directly
     stop_train_cfg = callback_cfg.stop_training_on_threshold
     periodic_eval_cfg = callback_cfg.periodic_evaluation
+    if periodic_eval_cfg is None:
+        raise ValueError("callbacks.periodic_evaluation is required, the shared-env eval callback runs on it.")
 
     # Initialize callbacks
     callbacks = []

@@ -1,7 +1,7 @@
 """Environment factory functions, create and wrap gym environments for RL training."""
 
 import copy
-from typing import Any, Callable
+from collections.abc import Callable
 
 import gymnasium as gym
 import rosnav_rl
@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import VecFrameStack
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 
 from ... import environments as arena_envs
+from ...environments.base_env import ArenaBaseEnv
 from ..cfg import (
     GeneralCfg,
     MonitoringCfg,
@@ -31,27 +32,27 @@ def load_vec_framestack(stack_size: int, env: VecEnv) -> VecEnv:
     return VecFrameStack(env, n_stack=stack_size, channels_order="first")
 
 
-def determine_env_class(simulator: Simulator) -> gym.Env | gym.Wrapper:
+def determine_env_class(simulator: Simulator | None) -> type[ArenaBaseEnv]:
     """Determines the environment class based on the specified simulator."""
     return arena_envs.GazeboEnv
 
 
 def _init_env_fnc(
     node: SupervisorNode,
-    env_class: gym.Env,
+    env_class: type[ArenaBaseEnv],
     ns: str | Namespace,
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
     init_by_call: bool = False,
-    obs_unit_kwargs: dict = None,
+    obs_unit_kwargs: dict | None = None,
     seed: int = 0,
-    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
-) -> callable:
+    wrappers: list[Callable[..., gym.Env]] | None = None,
+) -> Callable[[], gym.Env]:
 
-    def _init_env() -> gym.Env | gym.Wrapper:
-        env = env_class(
+    def _init_env() -> gym.Env:
+        env: gym.Env = env_class(
             node=node,
             ns=ns,
             space_manager=space_manager,
@@ -71,24 +72,24 @@ def _init_env_fnc(
 
 
 def _test_init_env_fnc(
-    env_class: gym.Env,
+    env_class: type[ArenaBaseEnv],
     ns: str | Namespace,
     space_manager: rosnav_rl.BaseSpaceManager,
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
-    node: SupervisorNode = None,
+    node: SupervisorNode | None = None,
     init_by_call: bool = False,
-    obs_unit_kwargs: dict = None,
+    obs_unit_kwargs: dict | None = None,
     seed: int = 0,
-    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    wrappers: list[Callable[..., gym.Env]] | None = None,
     observations_config: str | None = None,
     lockstep: bool = False,
     lockstep_step_seconds: float = 0.0999,
-) -> callable:
+) -> Callable[[], gym.Env]:
 
-    def _init_env() -> gym.Env | gym.Wrapper:
-        env = env_class(
+    def _init_env() -> gym.Env:
+        env: gym.Env = env_class(
             node=node,
             ns=ns,
             space_manager=space_manager,
@@ -112,17 +113,17 @@ def _test_init_env_fnc(
 
 def sb3_wrap_env(
     node: SupervisorNode,
-    env_fncs: list[callable],
+    env_fncs: list[Callable[[], gym.Env]],
     general_cfg: GeneralCfg,
     monitoring_cfg: MonitoringCfg,
-    profiling_cfg: ProfilingCfg,
+    profiling_cfg: ProfilingCfg | None,
 ) -> VecEnv:
     """
     Creates and wraps a single vectorized environment used for both training and
     evaluation (shared-env mode).
     """
 
-    def create_env(fncs: list[Callable]) -> VecEnv:
+    def create_env(fncs: list[Callable[[], gym.Env]]) -> VecEnv:
         return DelayedSubprocVecEnv(fncs, start_method="forkserver") if not general_cfg.debug_mode else GatheredDummyVecEnv(fncs)
 
     def apply_vec_stats_recorder(env: VecEnv) -> VecEnv:
@@ -164,13 +165,13 @@ def make_envs(
     n_envs: int,
     max_steps: int,
     init_env_by_call: bool,
-    namespace_fn: Callable,
-    node: SupervisorNode = None,
-    wrappers: list[Callable[[tuple[type[gym.Wrapper], Any]], gym.Wrapper]] = None,
+    namespace_fn: Callable[[int], str],
+    node: SupervisorNode | None = None,
+    wrappers: list[Callable[..., gym.Env]] | None = None,
     observations_config: str | None = None,
     lockstep: bool = False,
     lockstep_step_seconds: float = 0.0999,
-) -> list[Callable]:
+) -> list[Callable[[], gym.Env]]:
     """
     Creates a list of environment initialization functions.
 
@@ -190,13 +191,16 @@ def make_envs(
         List of callables, each initializing a gym environment when called.
     """
 
-    def create_env_fnc(ns: str | Namespace) -> callable:
+    def create_env_fnc(ns: str | Namespace) -> Callable[[], gym.Env]:
+        reward_function = rl_agent.reward_function
+        if reward_function is None:
+            raise ValueError("Training environments need an agent with a reward function.")
         return _test_init_env_fnc(
             node=node,
             env_class=determine_env_class(None),
             ns=ns,
             space_manager=copy.deepcopy(rl_agent.space_manager),
-            reward_function=rl_agent.reward_function.copy(),
+            reward_function=reward_function.copy(),
             simulation_state_container=simulation_state_container,
             max_steps_per_episode=max_steps,
             init_by_call=init_env_by_call,

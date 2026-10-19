@@ -126,20 +126,20 @@ def _make_sb3_trainer(training_cfg, pruner, namespace_fn):
 
     class _TuningSB3Trainer(StableBaselines3Trainer):
         def _train_impl(self, *args, **kwargs) -> None:
-            from stable_baselines3.common.callbacks import CallbackList
+            from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
-            cbs = [self.eval_cb]
+            cbs: list[BaseCallback] = [self.eval_cb]
             if pruner is not None:
                 cbs.append(pruner)
             combined = CallbackList(cbs) if len(cbs) > 1 else cbs[0]
 
             self.agent.train(
                 total_timesteps=(
-                    self.config.agent_config.framework.algorithm.parameters.total_timesteps
+                    self._framework_cfg().algorithm.parameters.total_timesteps
                 ),
                 callback=combined,
                 progress_bar=(
-                    self.config.agent_config.framework.algorithm.parameters.show_progress_bar
+                    self._framework_cfg().algorithm.parameters.show_progress_bar
                 ),
             )
 
@@ -167,7 +167,7 @@ def _make_dreamerv3_trainer(training_cfg, pruner, namespace_fn):
 
             after_eval = _combined if (curriculum_hook or pruner_hook) else None
 
-            fw_cfg = self.config.agent_config.framework
+            fw_cfg = self._framework_cfg()
             logger.info(
                 "[Train] DreamerV3 \u2014 total_steps=%d  eval_every=%d  device=%s",
                 fw_cfg.training.steps,
@@ -362,11 +362,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        import rclpy
+    import rclpy
 
+    exit_code: int | str | None = 1
+    try:
         rclpy.init()
         exit_code = main()
+    except SystemExit as exc:
+        exit_code = exc.code
     except KeyboardInterrupt:
         logger.info("\nTuning interrupted by user.")
         exit_code = 130

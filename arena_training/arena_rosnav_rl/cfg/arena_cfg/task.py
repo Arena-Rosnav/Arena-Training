@@ -146,7 +146,7 @@ class TaskCfg(BaseModel):
         Returns:
             List of curriculum stages or None if no curriculum configured
         """
-        return self.staged.curriculum_definition if self.staged.curriculum_definition else None
+        return self.staged.curriculum_definition if self.staged and self.staged.curriculum_definition else None
 
     def has_curriculum(self) -> bool:
         """Check if curriculum configuration is present."""
@@ -154,4 +154,4 @@ class TaskCfg(BaseModel):
 
     def get_starting_stage(self) -> int:
         """Get the starting stage index."""
-        return self.staged.starting_stage
+        return self.staged.starting_stage if self.staged else 0

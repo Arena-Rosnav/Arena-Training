@@ -6,6 +6,7 @@ import threading
 import time
 
 import rclpy
+import rclpy.executors
 import rclpy.qos
 from arena_rclpy_mixins.Async import AsyncNode, ClientWrapper
 from arena_runtime_msgs.srv import SpawnEnv

@@ -20,7 +20,7 @@ def get_dummy_dreamer_cfg() -> TrainingCfg:
                 debug_mode=True,
             )
         ),
-        agent_config=rosnav_rl.AgentConfig(
+        agent_config=rosnav_rl.AgentConfig(  # pyright: ignore[reportCallIssue]
             name=None,
             framework=dreamerv3_cfg.DreamerV3Cfg(),
             reward=rosnav_rl.RewardCfg(
@@ -49,13 +49,12 @@ def get_dummy_sb3_cfg() -> TrainingCfg:
     from .. import cfg as arena_cfg
 
     sb3 = sb3_cfg.StableBaselinesCfg(
-        algorithm=sb3_cfg.PPO_Cfg(architecture_name="AGENT_1", parameters=sb3_cfg.PPO_Algorithm_Cfg()),
-        architecture_name="AGENT_1",
+        algorithm=sb3_cfg.PPO_Cfg(architecture_name="AGENT_1", parameters=sb3_cfg.PPO_Algorithm_Cfg()),  # pyright: ignore[reportCallIssue]
     )
 
     return arena_cfg.TrainingCfg(
         arena_cfg=arena_cfg.ArenaSB3Cfg(),
-        agent_config=rosnav_rl.AgentConfig(
+        agent_config=rosnav_rl.AgentConfig(  # pyright: ignore[reportCallIssue]
             framework=sb3,
             reward=rosnav_rl.RewardCfg(
                 reward_function_dict={

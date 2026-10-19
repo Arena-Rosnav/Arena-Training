@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..cfg.train import TrainingCfg
     from ..trainer.arena_trainer import ArenaTrainer
 
-from .paths import PathDictionary, PathFactory
+from .paths import PathFactory
 
 
 def write_config_yaml(config: dict, path: str) -> None:
@@ -82,7 +82,7 @@ def create_model_directory(paths: dict, resume_name: str) -> None:
         os.makedirs(paths["model"])
 
 
-def create_evaluation_directory(paths: dict, log_evaluation: bool) -> str:
+def create_evaluation_directory(paths: dict, log_evaluation: bool) -> str | None:
     if log_evaluation:
         if not os.path.exists(paths["eval"]):
             os.makedirs(paths["eval"])
@@ -90,7 +90,7 @@ def create_evaluation_directory(paths: dict, log_evaluation: bool) -> str:
     return None
 
 
-def create_tensorboard_directory(paths: dict, use_wandb: bool) -> str:
+def create_tensorboard_directory(paths: dict, use_wandb: bool) -> str | None:
     if use_wandb:
         if not os.path.exists(paths["tb"]):
             os.makedirs(paths["tb"])
@@ -105,8 +105,9 @@ def load_config(file_path: str) -> dict:
     return config
 
 
-def setup_paths_dictionary(trainer: ArenaTrainer, is_debug_mode: bool = False) -> PathDictionary:
+def setup_paths_dictionary(trainer: ArenaTrainer, is_debug_mode: bool = False) -> None:
     agents_dir = trainer.config.resolved_agents_dir
+    assert trainer.config.agent_config.name is not None
     trainer.paths = PathFactory.get_paths(
         trainer.config.agent_config.name,
         trainer.config.arena_cfg.robot.robot_model,

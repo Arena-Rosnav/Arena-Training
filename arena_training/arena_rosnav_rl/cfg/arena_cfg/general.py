@@ -21,14 +21,14 @@ class GeneralCfg(BaseModel):
 
     debug_mode: bool = False
     no_gpu: bool = False
-    n_envs: int = Field(1, ge=1)
-    max_num_moves_per_eps: int = Field(150, ge=1)
-    goal_radius: float = Field(0.4, title="Goal Radius", gt=0)
-    safety_distance: float = Field(1.0, gt=0)
-    verbose: int | bool = Field(False, title="Verbose Mode")
-    control_hz: float = Field(10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
+    n_envs: int = Field(default=1, ge=1)
+    max_num_moves_per_eps: int = Field(default=150, ge=1)
+    goal_radius: float = Field(default=0.4, title="Goal Radius", gt=0)
+    safety_distance: float = Field(default=1.0, gt=0)
+    verbose: int | bool = Field(default=False, title="Verbose Mode")
+    control_hz: float = Field(default=10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
     lockstep: bool = False
     # Quantized to physics ticks server-side by sim_lifecycle/step.
-    lockstep_step_seconds: float = Field(0.0999, gt=0)
+    lockstep_step_seconds: float = Field(default=0.0999, gt=0)
     env_seed: int | None = None
     env_launch_args: list[list[str]] = Field(default_factory=list)

@@ -19,7 +19,7 @@ class VecActionChunk(VecEnvWrapper):
             action_space=spaces.Box(
                 low=np.tile(base.low, horizon),
                 high=np.tile(base.high, horizon),
-                dtype=base.dtype,
+                dtype=base.dtype.type,
             ),
         )
         self.horizon = horizon
@@ -37,10 +37,12 @@ class VecActionChunk(VecEnvWrapper):
         rewards = np.zeros(self.num_envs, dtype=np.float32)
         dones = np.zeros(self.num_envs, dtype=bool)
         infos: list[dict[str, Any]] = [{} for _ in range(self.num_envs)]
-        idle = np.zeros(self._step_shape, dtype=self._chunks.dtype)
+        chunks = self._chunks
+        assert chunks is not None
+        idle = np.zeros(self._step_shape, dtype=chunks.dtype)
         observations = None
         for tick in range(self.horizon):
-            commands = np.stack([idle if dones[i] else self._chunks[i, tick] for i in range(self.num_envs)])
+            commands = np.stack([idle if dones[i] else chunks[i, tick] for i in range(self.num_envs)])
             observations, tick_rewards, tick_dones, tick_infos = self.venv.step(commands)
             for i in range(self.num_envs):
                 if dones[i]:
@@ -49,4 +51,5 @@ class VecActionChunk(VecEnvWrapper):
                 infos[i] = tick_infos[i]
                 dones[i] = tick_dones[i]
         self._chunks = None
+        assert observations is not None
         return observations, rewards, dones, infos

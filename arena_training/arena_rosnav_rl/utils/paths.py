@@ -135,7 +135,7 @@ class RobotSetting(PathComponent):
         return robot.path / "model_params.yaml"
 
 
-class PathDictionary(dict):
+class PathDictionary(dict[type[PathComponent], PathComponent]):
     def create_all(self):
         for path in self.values():
             path.create()
@@ -151,7 +151,7 @@ class PathFactory:
         agent_name: str,
         robot_model: str,
         agents_dir: Path | None = None,
-    ) -> dict[type[PathComponent], PathComponent]:
+    ) -> PathDictionary:
         """Generate all required paths for the agent.
 
         Args:

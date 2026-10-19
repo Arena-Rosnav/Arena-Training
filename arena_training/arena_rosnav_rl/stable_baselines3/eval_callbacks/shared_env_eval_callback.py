@@ -9,6 +9,8 @@ to "eval mode" by pushing ``eval_max_steps`` to every worker via
 ``train_max_steps`` so normal rollout collection is unaffected.
 """
 
+from typing import Any
+
 from rosnav_rl.utils.stable_baselines3.callbacks import RosnavEvalCallback
 
 
@@ -26,7 +28,7 @@ class SharedEnvEvalCallback(RosnavEvalCallback):
         All other arguments are forwarded to :class:`RosnavEvalCallback`.
     """
 
-    def __init__(self, train_max_steps: int, eval_max_steps: int, **kwargs: object):
+    def __init__(self, train_max_steps: int, eval_max_steps: int, **kwargs: Any):
         super().__init__(**kwargs)
         self._train_max_steps = train_max_steps
         self._eval_max_steps = eval_max_steps

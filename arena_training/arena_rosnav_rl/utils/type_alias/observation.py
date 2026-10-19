@@ -1,15 +1,17 @@
 from typing import (
     Any,
     Callable,
+    Protocol,
     TypeVar,
 )
 
-import gymnasium
-
 from ...utils.paths import PathComponent
 
-# Gym Env
-EnvironmentType = TypeVar("EnvironmentType", bound=gymnasium.Env | gymnasium.Wrapper)
+
+class ClosableEnvironment(Protocol):
+    def close(self) -> None: ...
+
+
 InformationDict = dict[str, Any]
 
 PathsDict = dict[type[PathComponent], PathComponent]

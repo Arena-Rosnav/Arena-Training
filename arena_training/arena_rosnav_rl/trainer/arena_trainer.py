@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from rclpy.parameter import Parameter
 from rosnav_rl.rl_agent import RL_Agent
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
 
@@ -15,15 +16,15 @@ import arena_training.arena_rosnav_rl.cfg as arena_cfg
 from ..node import SupervisorNode
 from ..utils import paths as Paths
 from ..utils.hooks import HookManager, TrainingHookStages, bind_hooks
+from ..utils.paths import PathDictionary
 from ..utils.training import (
     print_base_model,
     setup_paths_dictionary,
 )
-from ..utils.type_alias.observation import EnvironmentType, PathsDict
+from ..utils.type_alias.observation import ClosableEnvironment
 
 if TYPE_CHECKING:
     from arena_robots.caps import MobileSpec
-    from rclpy.parameter import Parameter
 
 _init_log = logging.getLogger("arena_training.init")
 
@@ -45,7 +46,7 @@ class TrainingArguments:
         return self.__dict__
 
 
-class ArenaTrainer(ABC):
+class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
     """
     Abstract base class for reinforcement learning trainers in the Arena-Rosnav framework.
 
@@ -56,7 +57,7 @@ class ArenaTrainer(ABC):
     Attributes:
         __framework (SupportedRLFrameworks): The RL framework being used (e.g., SB3, RLlib).
         config_cls (TrainingCfg): Configuration settings for the training process.
-        paths (PathsDict): Dictionary containing paths for model saving, logging, etc.
+        paths (PathDictionary): Dictionary containing paths for model saving, logging, etc.
         agent (RL_Agent): The reinforcement learning agent being trained.
         environment (EnvironmentType): The training environment for the agent.
         hook_manager (HookManager): Manager for registering and executing hooks at various training stages.
@@ -79,7 +80,7 @@ class ArenaTrainer(ABC):
     _config_type: type[arena_cfg.ArenaBaseCfg]
 
     config: arena_cfg.TrainingCfg
-    paths: PathsDict
+    paths: PathDictionary
 
     agent: RL_Agent
     environment: EnvironmentType
@@ -90,7 +91,7 @@ class ArenaTrainer(ABC):
     def __init__(
         self,
         config: arena_cfg.TrainingCfg,
-        namespace_fn: Callable[[int], str] = None,
+        namespace_fn: Callable[[int], str] | None = None,
     ) -> None:
         """
         Initializes the ArenaTrainer with the given configuration.
@@ -247,18 +248,20 @@ class ArenaTrainer(ABC):
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
         robot_desc = robot_cfg.robot_description
+        assert caps is not None
+        assert robot_desc is not None
         general = self.config.arena_cfg.general
         linear, lateral, angular = action_ranges(robot_desc)
 
         # --- action space from robot description ---
         if robot_desc.is_holonomic:
-            action_space = OmnidirectionalActionSpace(
+            action_space = OmnidirectionalActionSpace(  # pyright: ignore[reportCallIssue]
                 linear_range_x=linear,
                 linear_range_y=lateral,
                 angular_range=angular,
             )
         else:
-            action_space = DifferentialDriveActionSpace(
+            action_space = DifferentialDriveActionSpace(  # pyright: ignore[reportCallIssue]
                 linear_range=linear,
                 angular_range=angular,
             )
@@ -268,11 +271,15 @@ class ArenaTrainer(ABC):
         discretization_cfg = self.config.agent_config.discretization
         if discretization_cfg is not None:
             action_space = action_space.model_copy(update={"discretization": discretization_cfg})
-            action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete)
+            action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete if robot_desc.actions is not None else None)
 
         arm_spaces = [ManipulatorActionSpace.from_config(arm_spec) for arm_spec in (caps.arm or {}).values()]
         if arm_spaces:
             action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
+
+        laser = robot_desc.laser
+        if laser is None:
+            raise ValueError(f"{robot_desc.path}: caps/mobile.yaml needs a laser to size the policy's scan observation")
 
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,
@@ -280,10 +287,10 @@ class ArenaTrainer(ABC):
         # hardware-derived values which must always come from the robot desc.
         parameters = self.config.agent_config.parameters.model_copy(
             update=dict(
-                laser_num_beams=robot_desc.laser.num_beams,
-                laser_angle_min=robot_desc.laser.angle.min,
-                laser_angle_increment=robot_desc.laser.angle.increment,
-                laser_max_range=robot_desc.laser.range,
+                laser_num_beams=laser.num_beams,
+                laser_angle_min=laser.angle.min,
+                laser_angle_increment=laser.angle.increment,
+                laser_max_range=laser.range,
                 min_linear_vel=linear[0],
                 max_linear_vel=linear[1],
                 min_angular_vel=angular[0],
@@ -321,8 +328,8 @@ class ArenaTrainer(ABC):
         raise NotImplementedError()
 
     @property
-    def is_debug_mode(self) -> Parameter:
-        return self.node.get_parameter_or("debug_mode", False)
+    def is_debug_mode(self) -> bool:
+        return bool(self.node.get_parameter_or("debug_mode", Parameter("debug_mode", value=False)).value)
 
     @property
     def is_resume(self) -> bool:

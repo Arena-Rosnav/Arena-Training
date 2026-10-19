@@ -4,12 +4,16 @@ import posixpath
 import threading
 import time
 from abc import ABC
-from typing import Any
+from typing import Any, cast
 
 import arena_robots.Robot
 import gymnasium
 import numpy as np
 import rclpy
+import rclpy.callback_groups
+import rclpy.parameter
+import rclpy.qos
+import rclpy.time
 import yaml
 from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
@@ -120,8 +124,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         node (SupervisorNode): The ROS2 node used for communication.
         env_ns (Namespace): The env's task_generator_node namespace (lifecycle/state).
         robot_ns (Namespace): The robot's namespace (cmd_vel, sensor topics). Set by `_resolve_robot`.
-        action_space (gymnasium.spaces.Box): The action space, defined by the space manager.
-        observation_space (gymnasium.spaces.Dict): The observation space, defined by the space manager.
+        action_space (gymnasium.spaces.Space): The action space, defined by the space manager.
+        observation_space (gymnasium.spaces.Space): The observation space, defined by the space manager.
         is_train_mode (bool): Flag indicating if the environment is in training mode.
         observation_collector (ObservationManager): Manages the collection of observations.
         metadata (dict): Standard Gymnasium metadata.
@@ -181,7 +185,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 Defaults to 0.0999.
         """
         super().__init__()
-        self.node = node
+        self._node = node
         self._owns_node = False
         self.env_ns = Namespace(ns) if isinstance(ns, str) else ns
 
@@ -240,19 +244,25 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if not init_by_call:
             self._initialize_environment()
 
+    @property
+    def node(self) -> SupervisorNode:
+        if self._node is None:
+            raise RuntimeError("Environment node is not initialized, call _initialize_environment() first.")
+        return self._node
+
     def _initialize_environment(self):
         """Initializes ROS-dependent components and the observation manager."""
         if self._initialized:
             return  # Already initialized
 
-        if self.node is None:
+        if self._node is None:
             if not rclpy.ok():
                 rclpy.init()  # Initialize ROS in worker process (e.g. Parallel daemon subprocess)
             env_node_name = f"{self.env_ns.to_string()}_env".replace("/", "_")
-            self.node = SupervisorNode(node_name=env_node_name)
+            self._node = SupervisorNode(node_name=env_node_name)
             self._owns_node = True
-            self.node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
-            self.node.start_spinning()
+            self._node.set_parameters([rclpy.parameter.Parameter("use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
+            self._node.start_spinning()
 
         self._declare_timeout_params()
         self._declare_lockstep_params()
@@ -286,10 +296,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         robots_topic = (self.env_ns / "state" / "robots").to_string()
         if not self._fleet_event.wait(timeout=self._timeout_param("fleet_wait_timeout")):
             raise RuntimeError(f"No robots fleet snapshot on '{robots_topic}'; task_generator did not publish state/robots.")
+        assert self._latest_fleet is not None
         if not self._latest_fleet.robots:
             raise RuntimeError(f"Robots fleet on '{robots_topic}' is empty; training requires at least one robot.")
 
-        robot = self._latest_fleet.robots[0].descriptor
+        robot = self._latest_fleet.robots[0].descriptor  # pyright: ignore[reportIndexIssue]
         self._robot_name = robot.name
         self.robot_ns = Namespace(robot.ns)
         base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
@@ -333,6 +344,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         # Direct cmd_vel publisher, the sole source of velocity commands
         # during training.  Completely bypasses the nav2 controller_server.
+        assert self.robot_ns is not None
         cmd_vel_topic = self.robot_ns("cmd_vel").to_string()
         self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
         self.node.get_logger().info(f"Created direct cmd_vel publisher at: {cmd_vel_topic}")
@@ -368,11 +380,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             if not self.node.has_parameter(name):
                 self.node.declare_parameter(name, default)
         self._lockstep = bool(self.node.get_parameter("lockstep").value)
-        self._lockstep_step_seconds = float(self.node.get_parameter("lockstep_step_seconds").value)
+        step_seconds = self.node.get_parameter("lockstep_step_seconds").value
+        assert isinstance(step_seconds, (int, float))
+        self._lockstep_step_seconds = float(step_seconds)
 
     def _timeout_param(self, name: str) -> float | None:
         """Read a timeout ROS param. Negative sentinel means infinite (None)."""
         val = self.node.get_parameter(name).value
+        assert isinstance(val, (int, float))
         return None if val < 0 else float(val)
 
     def _setup_observation_manager(self):
@@ -387,6 +402,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         with open(obs_config_path) as file:
             config = yaml.safe_load(file)
 
+        assert self.robot_source_frame is not None
+        assert self.robot_ns is not None
         set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
         arms = self._arm_specs()
         if arms:
@@ -403,15 +420,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
     @property
-    def action_space(self) -> gymnasium.spaces.Box:
+    def action_space(self) -> gymnasium.spaces.Space:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self._model_space_manager.action_space
 
     @property
-    def observation_space(self) -> gymnasium.spaces.Dict:
+    def observation_space(self) -> gymnasium.spaces.Space:  # pyright: ignore[reportIncompatibleVariableOverride]
         return self._model_space_manager.observation_space
 
     @property
     def agent_parameters(self) -> AgentParameters:
+        assert self.__agent_parameters is not None
         return self.__agent_parameters
 
     @property
@@ -450,7 +468,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
-        return self._model_space_manager.encode_observation(observation)
+        return cast(EncodedObservationDict, self._model_space_manager.encode_observation(observation))
 
     def _get_dt(self) -> float:
         """Returns the fixed lockstep duration or dynamically calculates elapsed time."""
@@ -505,6 +523,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
+                assert self._cmd_vel_pub is not None
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
 
     def step_sim(self) -> None:
@@ -528,7 +547,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         reward, reward_info = self._reward_function.get_reward(
             obs_dict=obs_dict,
-            simulation_state_container=self.__agent_parameters,
+            simulation_state_container=self.agent_parameters,
         )
 
         self._steps_curr_episode += 1
@@ -646,7 +665,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._reward_function.reset()
             self._model_space_manager.reset_spaces()
 
-            if self._latest_episode is not None and not self.observation_collector.wait_for_stamp(Time.from_msg(self._latest_episode.start_time), self._timeout_param("service_wait_timeout")):
+            if self._latest_episode is not None and not self.observation_collector.wait_for_stamp(rclpy.time.Time.from_msg(self._latest_episode.start_time), self._timeout_param("service_wait_timeout")):
                 self.node.get_logger().warn(f"[{self.env_ns.to_string()}] no sensor message from episode {self._latest_episode.episode_id} yet, the first observation may predate the reset")
 
             # Get the initial observation after reset.
@@ -736,6 +755,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def _call_hold_sync(self, action: int, reason: str, timeout: float = 10.0) -> None:
         """Blocking sim_lifecycle/hold call. Raises RuntimeError on failure or timeout."""
         caller_id = self.node.get_fully_qualified_name()
+        assert self._pause_srv is not None
         if action == LifecycleHoldSrv.Request.ACQUIRE:
             acquire_hold(self._pause_srv, caller_id, reason, timeout)
         elif not call_hold(self._pause_srv, caller_id, reason, action, timeout):
@@ -758,7 +778,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         req.seconds = seconds
 
         completion_event = threading.Event()
-        result_container = {"result": None, "exception": None}
+        result_container: dict[str, LifecycleStepSrv.Response | Exception | None] = {"result": None, "exception": None}
 
         def done_callback(future: Future):
             try:
@@ -768,6 +788,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             finally:
                 completion_event.set()
 
+        assert self._step_srv is not None
         future = self._step_srv.call_async(req)
         future.add_done_callback(done_callback)
 
@@ -776,7 +797,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             raise RuntimeError(f"sim_lifecycle/step timed out after {timeout}s")
         if result_container["exception"] is not None:
             raise RuntimeError(f"sim_lifecycle/step call failed: {result_container['exception']}")
-        return result_container["result"]
+        result = result_container["result"]
+        assert isinstance(result, LifecycleStepSrv.Response)
+        return result
 
     def reset_task(self, timeout: float | None = None, retries: int = 2) -> bool:
         """Call task-generator's lifecycle/reset_episode and block until it completes.
@@ -842,8 +865,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
     def _after_task_reset(self):
         """Point the goal-reached radius at the tolerance task_generator judges the new episode with."""
         tolerance = goal_tolerance(self._latest_episode, self._robot_name) if self._latest_episode is not None else None
-        if tolerance is not None and tolerance != self.__agent_parameters.goal_radius:
-            self.__agent_parameters = self.__agent_parameters.model_copy(update={"goal_radius": tolerance})
+        if tolerance is not None and tolerance != self.agent_parameters.goal_radius:
+            self.__agent_parameters = self.agent_parameters.model_copy(update={"goal_radius": tolerance})
 
     def _on_episode_state(self, msg: EpisodeRecord) -> None:
         self._latest_episode = msg

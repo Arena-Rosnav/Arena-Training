@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 
 class TimeSyncWrapper(_GymDelegatingWrapper):
+    env: ArenaBaseEnv
+
     def __init__(self, env: ArenaBaseEnv, control_hz: float = 10.0, warning_slop: float = 0.1):
         """
         A Gym Wrapper to synchronize step calls to a specific control frequency using ROS 2 time.
@@ -101,7 +103,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         self._last_step_exit_wall = time.monotonic()
         return _result
 
-    def reset(self, **kwargs: object) -> tuple[EncodedObservationDict, InformationDict]:
+    def reset(self, *, seed: int | None = None, options: dict | None = None) -> tuple[EncodedObservationDict, InformationDict]:
         """
         Resets the environment. Also resets the step timing mechanism for the first step
         after reset, similar to __init__.
@@ -109,7 +111,7 @@ class TimeSyncWrapper(_GymDelegatingWrapper):
         # Reset last_step_initiation_time so the first step after reset
         # doesn't try to align with the time before the reset call.
         # It will enforce its interval relative to the actual time of reset completion.
-        reset_return_value = self.env.reset(**kwargs)
+        reset_return_value = self.env.reset(seed=seed, options=options)
         self.last_step_initiation_time = self._now()
         self._skip_frequency_check = True  # First step after reset: don't warn
         return reset_return_value

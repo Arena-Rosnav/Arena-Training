@@ -4,6 +4,7 @@ from typing import Self
 
 import rosnav_rl
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from rosnav_rl.model.stable_baselines3.cfg import StableBaselinesCfg
 
 from ..utils.training import build_training_commented_map
 from .arena_cfg import ArenaBaseCfg
@@ -18,7 +19,7 @@ class TrainingCfg(BaseModel):
     resume: bool = False
 
     agents_dir: Path | None = Field(
-        None,
+        default=None,
         description=("Custom base directory for agent artifacts. Resolution order: this field → ROSNAV_AGENTS_DIR env var → default."),
     )
 
@@ -60,5 +61,7 @@ class TrainingCfg(BaseModel):
     def validate_resume(self) -> Self:
         if self.resume:
             assert self.agent_config.name is not None, "Agent name must be provided for resume!"
-            assert self.agent_config.framework.algorithm.checkpoint is not None, "Checkpoint must be provided for resume!"
+            framework = self.agent_config.framework
+            if isinstance(framework, StableBaselinesCfg):
+                assert framework.algorithm.checkpoint is not None, "Checkpoint must be provided for resume!"
         return self

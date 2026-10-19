@@ -12,18 +12,18 @@ class RobotCfg(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    robot_model: str = Field("jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
+    robot_model: str = Field(default="jackal", description="Robot identifier (e.g. 'jackal', 'burger')")
     parts: dict[str, list[RequestPart]] = Field(default_factory=dict, description="Slot-to-part assembly mapping")
     frames: dict[str, str] = Field(default_factory=dict, description="frame overrides")
 
     robot_description: MobileSpec | None = Field(
-        None,
+        default=None,
         alias="Robot Yaml Description",
         exclude=True,
     )
 
-    view: RobotView | None = Field(None, description="The fully resolved robot capabilities view", exclude=True)
-    effective_caps: RobotCaps | None = Field(None, description="Resolved effective capabilities", exclude=True)
+    view: RobotView | None = Field(default=None, description="The fully resolved robot capabilities view", exclude=True)
+    effective_caps: RobotCaps | None = Field(default=None, description="Resolved effective capabilities", exclude=True)
 
     @field_validator("parts", mode="before")
     @classmethod
@@ -45,6 +45,7 @@ class RobotCfg(BaseModel):
             object.__setattr__(self, "view", resolved_view)
 
         if self.robot_description is None:
+            assert self.view is not None
             mobile = self.view.mobile
             if mobile is None:
                 raise ValueError(f"robot '{self.robot_model}' does not advertise a 'mobile' cap, RobotCfg requires caps/mobile.yaml")
