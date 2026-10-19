@@ -4,6 +4,7 @@ resume: false
 
 agent_config:
   name: null  # agent name (should be unique) - used for model identification
+  observations_config: observations/manipulator.yaml
 
   # action space configuration - populated from robot description at runtime.
   # Use 'type: differential_drive' or 'type: omnidirectional' for an explicit
