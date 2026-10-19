@@ -23,6 +23,7 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
+    set_end_effector_frames,
     set_pedestrians_topic,
     set_robot_pose_frames,
 )
@@ -387,6 +388,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             config = yaml.safe_load(file)
 
         set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
+        arms = self._arm_specs()
+        if arms:
+            set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
         set_pedestrians_topic(config, self.robot_ns.to_string())
 
         # Create the observation manager from the configuration
