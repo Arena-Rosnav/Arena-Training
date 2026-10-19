@@ -6,7 +6,7 @@ import importlib.util
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from pydantic import Field
 
@@ -91,8 +91,8 @@ def _dump(config: TrainingCfg) -> dict[str, object]:
 
 def _summary(config: TrainingCfg, raw: dict[str, object]) -> dict[str, object]:
     dumped = _dump(config)
-    agent = dumped["agent_config"]
-    arena = dumped["arena_cfg"]
+    agent = cast("dict[str, Any]", dumped["agent_config"])
+    arena = cast("dict[str, Any]", dumped["arena_cfg"])
     raw_agent = raw.get("agent_config")
     algorithm = agent["framework"].get("algorithm")
     return {
@@ -241,11 +241,11 @@ def training_validate(
     base_dir: Annotated[str | None, Field(description="directory a relative observations_config in yaml_text resolves against, default the share configs dir")] = None,
 ) -> dict[str, object]:
     """Load a training config through load_training_config and return valid with a summary, or every validation error."""
-    if (yaml_text is None) == (path is None):
-        raise ToolError("pass exactly one of yaml_text or path")
-    if path is not None:
+    if path is not None and yaml_text is None:
         resolved = _resolve_config(path)
         return {"source": str(resolved), **_checked(resolved)}
+    if yaml_text is None or path is not None:
+        raise ToolError("pass exactly one of yaml_text or path")
     import yaml
     from yaml import YAMLError
 
@@ -257,10 +257,11 @@ def training_validate(
         except (YAMLError, ValueError) as exc:
             return {"source": "yaml_text", "valid": False, "errors": _errors(exc)}
         agent = raw.get("agent_config")
-        observations = agent.get("observations_config") if isinstance(agent, dict) else None
-        if isinstance(observations, str) and not Path(observations).is_absolute():
-            agent["observations_config"] = str(Path(base_dir).expanduser() / observations if base_dir else _configs_dir() / observations)
-            target.write_text(yaml.safe_dump(raw, sort_keys=False))
+        if isinstance(agent, dict):
+            observations = agent.get("observations_config")
+            if isinstance(observations, str) and not Path(observations).is_absolute():
+                agent["observations_config"] = str(Path(base_dir).expanduser() / observations if base_dir else _configs_dir() / observations)
+                target.write_text(yaml.safe_dump(raw, sort_keys=False))
         return {"source": "yaml_text", **_checked(target)}
 
 
