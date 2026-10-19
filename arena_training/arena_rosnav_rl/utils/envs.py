@@ -1,6 +1,6 @@
 import numpy as np
+from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import Twist
-from rclpy.duration import Duration
 from rosnav_rl.observations import DONE_REASONS
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
@@ -66,7 +66,7 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str],
     point = JointTrajectoryPoint()
     point.positions = action.tolist()
     sec = int(step_time)
-    point.time_from_start = Duration(seconds=sec, nanoseconds=int((step_time - sec) * 1e9)).to_msg()
+    point.time_from_start = Duration(sec=sec, nanosec=int((step_time - sec) * 1e9))
     trajectory = JointTrajectory()
     trajectory.joint_names = joint_names
     trajectory.points.append(point)
