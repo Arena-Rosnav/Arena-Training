@@ -28,7 +28,7 @@ dependencies = [
     "rosnav-rl", # Include local dependency in dev too
     "pyinstrument>=5.1.2",
 ]
-dynamic = ["license", "scripts"]
+dynamic = ["license", "scripts", "entry-points"]
 
 # Fixed local dependency using [tool.uv.sources]
 [tool.uv.sources]

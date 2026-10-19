@@ -128,6 +128,10 @@ Quick test without a simulator:
 ros2 run arena_training test_agent
 ```
 
+## MCP domain
+
+`arena_training/mcp.py` contributes the `training` domain to the Arena MCP server (`python3 -m arena_mcp ls training` lists its tools). Configs are named as in `arena train` (a file in the share `configs/` dir, or an absolute path) and every config goes through `load_training_config`, so the listing, the parsed `TrainingCfg` JSON with its schema (also the resource `arena://training/schema`) and validation of a file or of YAML text report what training would see. A relative `observations_config` in YAML text resolves against the share configs dir unless `base_dir` is given. Starting training runs `arena train train_config:=<config> [key:=value ...]` as a job and is refused while `/arena/register_env` answers, because training brings up its own runtime. `jobs_cancel` stops it gracefully. Agents are read from `ROSNAV_AGENTS_DIR`, else the arena_training default, with their checkpoints, the latest tensorboard scalars and the log tail of the training job that wrote them.
+
 ## Supported RL Frameworks
 
 | Framework | Algorithms |

@@ -19,5 +19,8 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [],
+        "arena_mcp.domains": [
+            "training = arena_training.mcp:domain",
+        ],
     },
 )
