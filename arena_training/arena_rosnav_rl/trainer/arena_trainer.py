@@ -25,6 +25,7 @@ from ..utils.type_alias.observation import ClosableEnvironment
 
 if TYPE_CHECKING:
     from arena_robots.caps import MobileSpec
+    from rosnav_rl.cfg.action_spaces import ActionSpaceSpec, DifferentialDriveActionSpace, OmnidirectionalActionSpace
 
 _init_log = logging.getLogger("arena_training.init")
 
@@ -36,6 +37,27 @@ def action_ranges(robot: MobileSpec) -> tuple[tuple[float, float], tuple[float, 
         raise ValueError(f"{robot.path}: caps/mobile.yaml needs velocity_limits to bound the policy's commands")
     lateral = limits.lateral if limits.lateral is not None else limits.linear
     return (limits.linear.min, limits.linear.max), (lateral.min, lateral.max), (limits.angular.min, limits.angular.max)
+
+
+def mobile_action_space(robot: MobileSpec, configured: ActionSpaceSpec | None) -> DifferentialDriveActionSpace | OmnidirectionalActionSpace:
+    """The agent_config action_space when the YAML sets a mobile one, else the robot's rated velocity_limits."""
+    from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, OmnidirectionalActionSpace
+
+    if isinstance(configured, (DifferentialDriveActionSpace, OmnidirectionalActionSpace)):
+        return configured
+    if configured is not None:
+        raise ValueError(f"agent_config.action_space takes type differential_drive or omnidirectional, got {configured.type!r}; arm spaces come from the robot's caps")
+    linear, lateral, angular = action_ranges(robot)
+    if robot.is_holonomic:
+        return OmnidirectionalActionSpace(  # pyright: ignore[reportCallIssue]
+            linear_range_x=linear,
+            linear_range_y=lateral,
+            angular_range=angular,
+        )
+    return DifferentialDriveActionSpace(  # pyright: ignore[reportCallIssue]
+        linear_range=linear,
+        angular_range=angular,
+    )
 
 
 @dataclass
@@ -243,7 +265,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
         directly from the robot description and arena config.
         """
-        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, DifferentialDriveActionSpace, ManipulatorActionSpace, OmnidirectionalActionSpace
+        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, ManipulatorActionSpace
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -251,20 +273,8 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         assert caps is not None
         assert robot_desc is not None
         general = self.config.arena_cfg.general
-        linear, lateral, angular = action_ranges(robot_desc)
-
-        # --- action space from robot description ---
-        if robot_desc.is_holonomic:
-            action_space = OmnidirectionalActionSpace(  # pyright: ignore[reportCallIssue]
-                linear_range_x=linear,
-                linear_range_y=lateral,
-                angular_range=angular,
-            )
-        else:
-            action_space = DifferentialDriveActionSpace(  # pyright: ignore[reportCallIssue]
-                linear_range=linear,
-                angular_range=angular,
-            )
+        linear, _lateral, angular = action_ranges(robot_desc)
+        action_space = mobile_action_space(robot_desc, self.config.agent_config.action_space)
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
