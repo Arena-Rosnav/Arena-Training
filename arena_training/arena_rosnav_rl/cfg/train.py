@@ -11,6 +11,16 @@ from .arena_cfg import ArenaBaseCfg
 from .sb3_cfg import ArenaSB3Cfg
 
 
+def resolve_agents_dir(agents_dir: Path | None) -> Path | None:
+    """agents_dir, else ROSNAV_AGENTS_DIR, else None for the PathFactory default."""
+    if agents_dir is not None:
+        return Path(agents_dir).expanduser().resolve()
+    env_dir = os.environ.get("ROSNAV_AGENTS_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return None
+
+
 class TrainingCfg(BaseModel):
     __version__ = "0.1.0"
 
@@ -37,14 +47,7 @@ class TrainingCfg(BaseModel):
             2. ``ROSNAV_AGENTS_DIR`` environment variable.
             3. ``None`` → PathFactory uses its built-in default.
         """
-        if self.agents_dir is not None:
-            return Path(self.agents_dir).expanduser().resolve()
-
-        env_dir = os.environ.get("ROSNAV_AGENTS_DIR")
-        if env_dir:
-            return Path(env_dir).expanduser().resolve()
-
-        return None  # let PathFactory use its default
+        return resolve_agents_dir(self.agents_dir)
 
     def to_yaml(self, path: str | Path) -> None:
         """Save the full training config as a structured, human-readable YAML."""

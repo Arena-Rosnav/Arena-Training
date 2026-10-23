@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import datetime
 import importlib.util
-import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 from pydantic import Field
 
 from arena_mcp.core import JOBS, ROS, Domain, Job, ToolError, cli
+from arena_mcp.core.envs import RUNTIME
 
 if TYPE_CHECKING:
     from arena_training.arena_rosnav_rl.cfg import TrainingCfg
@@ -26,7 +26,7 @@ domain = Domain(
 
 CHECKPOINT_SUFFIXES = (".zip", ".pt")
 EVENTS_GLOB = "events.out.tfevents.*"
-REGISTER_ENV = "/arena/register_env"
+REGISTER_ENV = f"{RUNTIME}/register_env"
 
 
 def _configs_dir() -> Path:
@@ -41,18 +41,13 @@ def _config_names() -> list[str]:
 
 
 def _resolve_config(name_or_path: str) -> Path:
-    path = Path(name_or_path).expanduser()
-    if path.is_absolute():
-        if not path.is_file():
-            raise ToolError(f"config {path} does not exist", hint="training_configs lists the shipped configs")
-        return path
-    candidates = [_configs_dir() / name_or_path]
-    if not name_or_path.endswith((".yaml", ".yml")):
-        candidates.append(_configs_dir() / f"{name_or_path}.yaml")
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise ToolError(f"no training config {name_or_path!r} in {_configs_dir()}, available: {', '.join(_config_names())}", hint="pass a config name from training_configs or an absolute path")
+    from arena_training.arena_rosnav_rl.utils.config import get_config_path
+
+    try:
+        return get_config_path(name_or_path)
+    except FileNotFoundError as exc:
+        reason = str(exc).splitlines()[0]
+        raise ToolError(f"no training config {name_or_path!r}: {reason}, available: {', '.join(_config_names())}", hint="pass a config name from training_configs or an absolute path") from exc
 
 
 def _raw(path: Path) -> dict[str, object]:
@@ -128,12 +123,10 @@ def _checked(path: Path) -> dict[str, object]:
 
 
 def _agents_root(agents_dir: str | None) -> Path:
+    from arena_training.arena_rosnav_rl.cfg.train import resolve_agents_dir
     from arena_training.arena_rosnav_rl.utils.paths import PathFactory
 
-    if agents_dir:
-        return Path(agents_dir).expanduser().resolve()
-    env_dir = os.environ.get("ROSNAV_AGENTS_DIR")
-    return Path(env_dir).expanduser().resolve() if env_dir else PathFactory.DEFAULT_AGENTS_DIR
+    return resolve_agents_dir(Path(agents_dir) if agents_dir else None) or PathFactory.DEFAULT_AGENTS_DIR
 
 
 def _stamp(mtime: float) -> str:

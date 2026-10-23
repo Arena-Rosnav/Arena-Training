@@ -40,7 +40,7 @@ def test_configs_lists_every_shipped_config_with_its_loaded_fields():
 
 
 def test_config_returns_the_parsed_model_and_its_schema():
-    out = training_config("sb_training_config")
+    out = training_config("sb_training_config.yaml")
     loaded = load_training_config(str(CONFIGS / "sb_training_config.yaml")).model_dump(mode="json")
     assert out["path"] == str(CONFIGS / "sb_training_config.yaml")
     assert out["config"]["arena_cfg"] == loaded["arena_cfg"]
@@ -65,6 +65,15 @@ def test_config_serializes_robot_parts_of_a_manipulator_config():
 def test_config_names_the_available_configs_for_an_unknown_name():
     with pytest.raises(ToolError, match="sb_training_config.yaml"):
         training_config("no_such_config")
+    with pytest.raises(ToolError, match="no training config 'sb_training_config'"):
+        training_config("sb_training_config")
+
+
+def test_config_resolves_a_path_relative_to_the_current_directory_first(tmp_path):
+    copy = tmp_path / "sb_training_config.yaml"
+    copy.write_text((CONFIGS / "sb_training_config.yaml").read_text())
+    out = training_config(os.path.relpath(copy, Path.cwd()), schema=False)
+    assert Path(out["path"]).resolve() == copy.resolve()
 
 
 def test_validate_accepts_a_shipped_config_by_path_and_by_text():
@@ -125,6 +134,23 @@ def test_agents_lists_checkpoints_newest_agent_first(tmp_path):
 
 def test_agents_of_a_missing_dir_is_empty(tmp_path):
     assert training_agents(agents_dir=str(tmp_path / "absent"))["agents"] == []
+
+
+AGENTS_ROOT = """
+import json
+from arena_training.arena_rosnav_rl.utils.config import load_training_config
+from arena_training.mcp import training_agents
+config = load_training_config(%r)
+print(json.dumps({"tool": training_agents()["agents_dir"], "config": str(config.resolved_agents_dir)}))
+"""
+
+
+def test_agents_dir_follows_rosnav_agents_dir_like_the_training_config(tmp_path):
+    env = {**os.environ, "ROSNAV_AGENTS_DIR": str(tmp_path)}
+    done = subprocess.run([sys.executable, "-c", AGENTS_ROOT % str(CONFIGS / "sb_training_config.yaml")], env=env, capture_output=True, text=True, timeout=120, check=False)
+    lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
+    assert lines, done.stdout + done.stderr
+    assert json.loads(lines[-1]) == {"tool": str(tmp_path.resolve()), "config": str(tmp_path.resolve())}
 
 
 def test_status_reads_tensorboard_scalars(tmp_path):
