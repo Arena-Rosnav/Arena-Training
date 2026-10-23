@@ -1,5 +1,6 @@
 """Training configuration loader."""
 
+import json
 from pathlib import Path
 
 from .. import cfg
@@ -14,4 +15,4 @@ def load_training_config(path: str) -> cfg.TrainingCfg:
     if obs_cfg and not Path(obs_cfg).is_absolute():
         raw["agent_config"]["observations_config"] = str(Path(path).parent / obs_cfg)
 
-    return cfg.TrainingCfg.model_validate(raw, strict=True, from_attributes=True)
+    return cfg.TrainingCfg.model_validate_json(json.dumps(raw), strict=True)
