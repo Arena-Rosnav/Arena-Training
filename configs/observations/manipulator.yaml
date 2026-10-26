@@ -98,6 +98,11 @@ datasources:
       topic: "cmd_vel"                 # Robot velocity commands
       # up_to_date_required: true
 
+  last_arm_action:
+    type: trajectory_msgs/JointTrajectory
+    params:
+      topic: "joint_trajectory"
+
   robot_twist:
     type: OdometryTwistCollector       # measured robot velocity in the base frame
     params:
