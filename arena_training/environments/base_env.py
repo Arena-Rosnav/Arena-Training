@@ -22,7 +22,7 @@ from geometry_msgs.msg import Twist
 from rclpy.client import Client
 from rclpy.publisher import Publisher
 from rclpy.task import Future
-from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import BaseActionSpace, GripperActionSpace, CompositeActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -517,6 +517,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
+            elif isinstance(spec, GripperActionSpace):
+                pass # TODO
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 assert self._cmd_vel_pub is not None

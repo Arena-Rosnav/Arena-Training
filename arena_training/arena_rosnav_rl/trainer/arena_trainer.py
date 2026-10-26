@@ -265,7 +265,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
         directly from the robot description and arena config.
         """
-        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, ManipulatorActionSpace
+        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -286,6 +286,10 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         arm_spaces = [ManipulatorActionSpace.from_config(arm_spec) for arm_spec in (caps.arm or {}).values()]
         if arm_spaces:
             action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
+
+        gripper_spaces = [GripperActionSpace.from_config(gripper_spec) for gripper_spec in (caps.gripper or {}.values())]
+        if gripper_spaces:
+            action_space = CompositeActionSpace(action_spaces=[action_space, *gripper_spaces])
 
         laser = robot_desc.laser
         if laser is None:
