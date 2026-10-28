@@ -287,7 +287,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         if arm_spaces:
             action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
 
-        gripper_spaces = [GripperActionSpace.from_config(gripper_spec) for gripper_spec in (caps.gripper or {}.values())]
+        gripper_spaces = [GripperActionSpace.from_config(gripper_spec) for gripper_spec in (caps.gripper or {}).values()]
         if gripper_spaces:
             action_space = CompositeActionSpace(action_spaces=[action_space, *gripper_spaces])
 
