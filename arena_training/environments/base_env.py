@@ -18,11 +18,13 @@ import yaml
 from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
+from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
+from rclpy.action import ActionClient
 from rclpy.client import Client
 from rclpy.publisher import Publisher
 from rclpy.task import Future
-from rosnav_rl.cfg.action_spaces import BaseActionSpace, GripperActionSpace, CompositeActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -44,6 +46,7 @@ from trajectory_msgs.msg import JointTrajectory
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
+    get_gripper_command_from_action,
     get_joint_trajectory_from_action,
     get_twist_from_action,
 )
@@ -216,6 +219,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_srv = None
         self._cmd_vel_pub = None
         self._joint_trajectory_pubs: dict[str, Publisher] = {}
+        self._gripper_action_clients: dict[str, ActionClient] = {}
         self._episode_state_sub = None
         self._latest_episode: EpisodeRecord | None = None
         self._episode_event = threading.Event()
@@ -354,6 +358,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._joint_trajectory_pubs[arm.controller] = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
             self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
 
+        for gripper in self._gripper_specs():
+            gripper_cmd_topic = self.robot_ns(f"{gripper.controller}/gripper_cmd").to_string()
+            self._gripper_action_clients[gripper.controller] = ActionClient(self.node, GripperCommand, gripper_cmd_topic)
+            self.node.get_logger().info(f"Created GripperCommand action client at: {gripper_cmd_topic}")
+
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
         episode_topic = (self.env_ns / "state" / "episode").to_string()
         self._episode_state_sub = self.node.create_subscription(
@@ -462,6 +471,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
         return [s for s in specs if isinstance(s, ManipulatorActionSpace)]
 
+    def _gripper_specs(self) -> list[GripperActionSpace]:
+        """The gripper sub-spaces of the action space."""
+        spec = self._model_space_manager.action_space_manager.spec
+        specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
+        return [s for s in specs if isinstance(s, GripperActionSpace)]
+
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
         return cast(EncodedObservationDict, self._model_space_manager.encode_observation(observation))
@@ -518,7 +533,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             if isinstance(spec, ManipulatorActionSpace):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
             elif isinstance(spec, GripperActionSpace):
-                pass # TODO
+                client = self._gripper_action_clients[spec.controller]
+                if client and client.server_is_ready():
+                    client.send_goal_async(get_gripper_command_from_action(decoded))
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 assert self._cmd_vel_pub is not None
