@@ -461,6 +461,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         assert isinstance(self._model_space_manager, BaseSpaceManager)
         assert isinstance(self._reward_function, RewardFunction)
 
+    def _decode_action(self, action: np.ndarray) -> np.ndarray:
+        """Decodes the given action using the model space encoder."""
+        return self._model_space_manager.decode_action(action)
+
     def _decode_split_action(self, action: np.ndarray) -> list[tuple[BaseActionSpace, np.ndarray]]:
         """Decode action into its sub-spaces and their commands."""
         return self._model_space_manager.decode_split_action(action)
