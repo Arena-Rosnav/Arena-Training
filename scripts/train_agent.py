@@ -17,7 +17,6 @@ import sys
 import logging
 import time
 from contextlib import contextmanager
-from pathlib import Path
 
 import torch
 import rclpy
@@ -25,7 +24,7 @@ import rclpy
 # Import arena_training subpackages
 from arena_training.arena_rosnav_rl.cfg import RobotCfg
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
-from arena_training.arena_rosnav_rl.utils.config import load_training_config
+from arena_training.arena_rosnav_rl.utils.config import get_config_path, load_training_config
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
 from arena_training.arena_rosnav_rl.trainer import get_trainer
 
@@ -47,66 +46,6 @@ def _stage(label: str):
 # Disable compilation features that conflict with multiprocessing
 # Disable dynamo entirely to avoid issues with parallel environments
 # torch._dynamo.config.disable = True
-
-
-def get_config_path(args) -> Path:
-    """
-    Get the full path to the training configuration file.
-
-    Args:
-        args: Parsed command-line arguments containing config filename
-
-    Returns:
-        Path: Full path to the configuration file
-
-    Raises:
-        FileNotFoundError: If the config file cannot be found
-
-    Notes:
-        If the config argument is an absolute path, it is used directly.
-        Otherwise, it looks for the config in the arena_bringup package's config directory.
-    """
-    config_file = args.config
-
-    # Convert to Path object
-    config_path = Path(config_file)
-
-    # If absolute path is provided, verify it exists
-    if config_path.is_absolute():
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-        logger.info(f"Using config file: {config_path}")
-        return config_path
-
-    # Try current working directory first
-    if config_path.exists():
-        logger.info(
-            f"Using config file from current directory: {config_path.absolute()}"
-        )
-        return config_path.absolute()
-
-    # Try to find the config in the arena_training package share
-    from ament_index_python.packages import get_package_share_directory
-
-    try:
-        arena_training_dir = get_package_share_directory("arena_training")
-        package_config_path = Path(arena_training_dir) / "configs" / config_file
-
-        if package_config_path.exists():
-            logger.info(f"Using config file from arena_training: {package_config_path}")
-            return package_config_path
-        else:
-            logger.warning(f"Config file not found at {package_config_path}")
-    except Exception as e:
-        logger.warning(f"Could not locate arena_training package: {e}")
-
-    raise FileNotFoundError(
-        f"Config file '{config_file}' not found in:\n"
-        f"  - Current directory\n"
-        f"  - arena_training package share configs\n"
-        f"  - arena_bringup package configs\n"
-        f"Please provide an absolute path or ensure the file exists in one of these locations."
-    )
 
 
 def validate_environment():
@@ -158,7 +97,7 @@ def main():
         with _stage("wait_for_simulation"):
             wait_for_simulation(timeout=120.0)
 
-        config_path = get_config_path(args)
+        config_path = get_config_path(args.config)
 
         logger.info(f"\n{'='*70}")
         logger.info("  Arena Training Pipeline")
