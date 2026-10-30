@@ -1,8 +1,11 @@
+from typing import Any
+
 import arena_robots.Robot
+import attrs
 from arena_robots.assembly import RequestPart
 from arena_robots.caps import MobileSpec, RobotCaps
 from arena_robots.Robot import RobotView
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class RobotCfg(BaseModel):
@@ -29,6 +32,10 @@ class RobotCfg(BaseModel):
     @classmethod
     def _parse_parts(cls, value: dict[str, list[dict | RequestPart]]) -> dict[str, list[RequestPart]]:
         return {category: [RequestPart(**item) if isinstance(item, dict) else item for item in items] for category, items in value.items()}
+
+    @field_serializer("parts")
+    def _dump_parts(self, parts: dict[str, list[RequestPart]]) -> dict[str, list[dict[str, Any]]]:
+        return {slot: [attrs.asdict(p) for p in part_list] for slot, part_list in parts.items()}
 
     @property
     def launch_arg(self) -> str:
