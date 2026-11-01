@@ -74,10 +74,9 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str],
     return trajectory
 
 
-def get_gripper_command_from_action(action: np.ndarray) -> GripperCommand.Goal:
-    """Translates decoded action (scalar float) into a GripperCommand action goal."""
-    target_position = float(action[0])
-    cmd = GripperCommand.Goal()
-    cmd.command.position = target_position
-    cmd.command.max_effort = 5.0  # TODO get actual value
-    return cmd
+def get_gripper_command(position: float, max_effort: float) -> GripperCommand.Goal:
+    """GripperCommand goal driving the gripper joint to *position* with at most *max_effort*."""
+    goal = GripperCommand.Goal()
+    goal.command.position = position
+    goal.command.max_effort = max_effort
+    return goal

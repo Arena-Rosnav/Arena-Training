@@ -46,7 +46,7 @@ from trajectory_msgs.msg import JointTrajectory
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
-    get_gripper_command_from_action,
+    get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
 )
@@ -538,8 +538,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
             elif isinstance(spec, GripperActionSpace):
                 client = self._gripper_action_clients[spec.controller]
-                if client and client.server_is_ready():
-                    client.send_goal_async(get_gripper_command_from_action(decoded))
+                if client.server_is_ready():
+                    client.send_goal_async(get_gripper_command(float(decoded[0]), spec.max_effort))
+                else:
+                    self.node.get_logger().warning(f"[{self.env_ns.to_string()}] {spec.controller}/gripper_cmd is not ready, gripper command dropped", throttle_duration_sec=5.0)
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 assert self._cmd_vel_pub is not None
@@ -681,6 +683,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._after_task_reset()
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
 
+            self._open_grippers()
             self._reward_function.reset()
             self._model_space_manager.reset_spaces()
 
@@ -697,6 +700,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         info = {}
         return self._encode_observation(obs_dict), info
 
+    def _open_grippers(self) -> None:
+        """Waits for every gripper action server and sends it the open position."""
+        for gripper in self._gripper_specs():
+            client = self._gripper_action_clients[gripper.controller]
+            if not client.wait_for_server(timeout_sec=10.0):
+                raise RuntimeError(f"Gripper action server '{gripper.controller}/gripper_cmd' not available after 10s")
+            client.send_goal_async(get_gripper_command(gripper.positions["open"], gripper.max_effort))
+
     def close(self):
         """Cleans up ROS2 resources."""
         self.node.get_logger().info("Closing environment and shutting down ROS components.")
@@ -706,6 +717,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._release_lockstep_hold()
         if self._cmd_vel_pub is not None:
             self.node.destroy_publisher(self._cmd_vel_pub)
+        for client in self._gripper_action_clients.values():
+            client.destroy()
         if self._reset_task_srv is not None:
             self._reset_task_srv.destroy()
         if self._pause_srv is not None:
