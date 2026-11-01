@@ -42,9 +42,7 @@ def test_manipulator_config_contains_components():
     assert isinstance(space, CompositeActionSpace)
 
     assert any(base.type in ("differential_drive", "omnidirectional") for base in space.action_spaces)
-
     assert any(isinstance(component, ManipulatorActionSpace) for component in space.action_spaces)
-
     assert any(isinstance(component, GripperActionSpace) for component in space.action_spaces)
 
 
@@ -52,7 +50,6 @@ def test_manipulator_config_drives_the_base():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
     base = next(component for component in space.action_spaces if component.type in ("differential_drive", "omnidirectional"))
-
     assert space.num_dof == base.num_dof + 7
 
 
@@ -60,7 +57,6 @@ def test_manipulator_config_drives_the_arm():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
     arm = next(component for component in space.action_spaces if isinstance(component, ManipulatorActionSpace))
-
     assert (arm.controller, arm.tip_link, len(arm.joint_names)) == ("arm_controller", "robot_arm_tool0", 6)
     assert arm.stow_positions is not None
 
@@ -69,7 +65,6 @@ def test_manipulator_config_drives_the_gripper():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
     gripper = next(component for component in space.action_spaces if isinstance(component, GripperActionSpace))
-
     assert gripper.num_dof == 1
 
 
