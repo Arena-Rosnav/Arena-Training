@@ -112,6 +112,9 @@ arena_cfg:
           mount: wrist_cam
         - variant: d435_color
           mount: arm_base_cam
+      gripper:
+        - variant: robotiq_2f_85
+          mount: gripper_mount
 
   # general training configuration
   general:

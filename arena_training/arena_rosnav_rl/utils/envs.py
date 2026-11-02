@@ -1,5 +1,6 @@
 import numpy as np
 from builtin_interfaces.msg import Duration
+from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
 from rosnav_rl.observations import DONE_REASONS
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -71,3 +72,11 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str],
     trajectory.joint_names = joint_names
     trajectory.points = [point]
     return trajectory
+
+
+def get_gripper_command(position: float, max_effort: float) -> GripperCommand.Goal:
+    """GripperCommand goal driving the gripper joint to *position* with at most *max_effort*."""
+    goal = GripperCommand.Goal()
+    goal.command.position = position
+    goal.command.max_effort = max_effort
+    return goal
