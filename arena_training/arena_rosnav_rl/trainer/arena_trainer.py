@@ -49,12 +49,12 @@ def mobile_action_space(robot: MobileSpec, configured: ActionSpaceSpec | None) -
         raise ValueError(f"agent_config.action_space takes type differential_drive or omnidirectional, got {configured.type!r}; arm spaces come from the robot's caps")
     linear, lateral, angular = action_ranges(robot)
     if robot.is_holonomic:
-        return OmnidirectionalActionSpace(  # pyright: ignore[reportCallIssue]
+        return OmnidirectionalActionSpace(
             linear_range_x=linear,
             linear_range_y=lateral,
             angular_range=angular,
         )
-    return DifferentialDriveActionSpace(  # pyright: ignore[reportCallIssue]
+    return DifferentialDriveActionSpace(
         linear_range=linear,
         angular_range=angular,
     )
