@@ -208,7 +208,7 @@ async def main():
     executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     try:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 30
         while "/arena/register_env" not in (await ROS.graph())["services"] and time.monotonic() < deadline:
             await asyncio.sleep(0.2)
         try:
@@ -228,7 +228,9 @@ def test_start_refuses_while_a_runtime_serves_register_env():
     pytest.importorskip("rclpy")
     pytest.importorskip("arena_runtime_msgs")
     env = {key: value for key, value in os.environ.items() if key != "ARENA_DIR"}
-    env.update(ROS_DOMAIN_ID=str(200 + os.getpid() % 30), ROS_AUTOMATIC_DISCOVERY_RANGE="LOCALHOST")
+    inherited = os.environ.get("ROS_DOMAIN_ID")
+    domain = int(inherited) + 100 if inherited else 200 + os.getpid() % 30
+    env.update(ROS_DOMAIN_ID=str(domain), ROS_AUTOMATIC_DISCOVERY_RANGE="LOCALHOST")
     done = subprocess.run([sys.executable, "-c", REFUSAL], env=env, capture_output=True, text=True, timeout=120, check=False)
     lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
     assert lines, done.stdout + done.stderr
