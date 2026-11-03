@@ -254,7 +254,7 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
                     parameter_node_template=task_cfg.staged.parameter_node_template,
                     timeout=task_cfg.staged.timeout,
                     verbose=1,
-                    modes=task_cfg.modes,
+                    modes=task_cfg.env_mode_names(),
                 )
             )
         if arena_sb3_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:

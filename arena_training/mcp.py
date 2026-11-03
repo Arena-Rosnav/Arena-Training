@@ -74,7 +74,7 @@ def _load(path: Path) -> tuple[TrainingCfg, dict[str, object]]:
 
     raw = _raw(path)
     config = load_training_config(str(path))
-    task_layer().validate_modes(config.arena_cfg.task.mode_names())
+    task_layer().validate_modes(config.arena_cfg.task.env_mode_names())
     return config, raw
 
 

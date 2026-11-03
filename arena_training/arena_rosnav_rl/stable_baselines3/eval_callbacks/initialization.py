@@ -110,7 +110,7 @@ def init_sb3_callbacks(
                 timeout=task_cfg.staged.timeout,
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
-                modes=task_cfg.modes,
+                modes=task_cfg.env_mode_names(),
             )
             callbacks.append(curriculum_cb)
 

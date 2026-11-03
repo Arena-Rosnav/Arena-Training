@@ -18,6 +18,7 @@ right value based on ``threshold_type`` and delegates to
 """
 
 import logging
+from collections.abc import Mapping, Sequence
 
 from rclpy.node import Node
 from rosnav_rl.utils.curriculum.curriculum_base import CurriculumBase
@@ -61,7 +62,7 @@ class DreamerV3Curriculum(CurriculumBase):
         num_envs: int,
         verbose: int = 0,
         *,
-        modes: dict[str, str | list[str]] | None = None,
+        modes: Mapping[str, str | Sequence[str]] | None = None,
     ):
         """Construct from a ``StagedCfg`` config object.
 

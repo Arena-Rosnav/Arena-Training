@@ -131,6 +131,7 @@ class StagedCfg(BaseModel):
 
 
 DEFAULT_MODES = {"robots": "random", "obstacles": "random", "modules": "staged"}
+TRAINING_MODULES = ("staged",)
 
 
 class TaskCfg(BaseModel):
@@ -158,6 +159,10 @@ class TaskCfg(BaseModel):
 
     def mode_names(self) -> dict[str, list[str]]:
         return {axis: [name for name in names.split(",") if name] for axis, names in self.modes.items()}
+
+    def env_mode_names(self) -> dict[str, list[str]]:
+        """The mode names the env runs, without the modules the trainer runs itself."""
+        return {axis: [name for name in names if axis != "modules" or name not in TRAINING_MODULES] for axis, names in self.mode_names().items()}
 
     def runs_module(self, name: str) -> bool:
         return name in self.mode_names().get("modules", [])
