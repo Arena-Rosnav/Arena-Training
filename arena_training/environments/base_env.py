@@ -24,7 +24,7 @@ from rclpy.action import ActionClient
 from rclpy.client import Client
 from rclpy.publisher import Publisher
 from rclpy.task import Future
-from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -38,7 +38,7 @@ from rosnav_rl.reward.reward_units.reward_units import RewardCollision
 from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.utils.logging import flush_errors_decorator
 from rosnav_rl.utils.rostopic import Namespace
-from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
+from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from task_generator_msgs.srv import ResetEpisode
 from trajectory_msgs.msg import JointTrajectory
@@ -461,11 +461,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         assert isinstance(self._model_space_manager, BaseSpaceManager)
         assert isinstance(self._reward_function, RewardFunction)
 
-    def _decode_action(self, action: np.ndarray) -> np.ndarray:
-        """Decodes the given action using the model space encoder."""
-        return self._model_space_manager.decode_action(action)
-
-    def _decode_split_action(self, action: np.ndarray) -> list[tuple[BaseActionSpace, np.ndarray]]:
+    def _decode_split_action(self, action: np.ndarray) -> list[DecodedAction]:
         """Decode action into its sub-spaces and their commands."""
         return self._model_space_manager.decode_split_action(action)
 
