@@ -18,7 +18,6 @@ right value based on ``threshold_type`` and delegates to
 """
 
 import logging
-from typing import Any
 
 from rclpy.node import Node
 from rosnav_rl.utils.curriculum.curriculum_base import CurriculumBase
@@ -62,7 +61,7 @@ class DreamerV3Curriculum(CurriculumBase):
         num_envs: int,
         verbose: int = 0,
         *,
-        tm_dict: dict[str, Any] | None = None,
+        modes: dict[str, str | list[str]] | None = None,
     ):
         """Construct from a ``StagedCfg`` config object.
 
@@ -71,7 +70,7 @@ class DreamerV3Curriculum(CurriculumBase):
             staged_cfg: ``StagedCfg`` instance from ``arena_cfg.task.staged``.
             num_envs:   Number of parallel environments (for parameter broadcast).
             verbose:    Verbosity level (0=WARNING, 1=INFO, 2=DEBUG).
-            tm_dict:    Optional ``{tm_robots, tm_obstacles, tm_modules}``.
+            modes:      Optional axis -> mode names queued before the first stage.
         """
         # Must be set before CurriculumBase.__init__ because the base
         # constructor calls _apply_curriculum() which may trigger
@@ -89,7 +88,7 @@ class DreamerV3Curriculum(CurriculumBase):
             timeout=staged_cfg.timeout,
             starting_stage=staged_cfg.starting_stage,
             verbose=verbose,
-            tm_dict=tm_dict,
+            modes=modes,
         )
 
     # ── CurriculumBase abstract interface ──────────────────────────────────

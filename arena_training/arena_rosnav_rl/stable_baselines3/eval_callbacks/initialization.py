@@ -63,7 +63,6 @@ def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
     n_envs: int,
-    tm_modules: str,
     model_save_path: str,
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
@@ -79,7 +78,6 @@ def init_sb3_callbacks(
         node: ROS2 supervisor node
         eval_env (VecEnv): The evaluation environment.
         n_envs (int): Number of environments.
-        tm_modules (str): Task modules the task generator runs.
         model_save_path (str): Path to save the model.
         eval_log_path (str): Path to save evaluation logs.
         callback_cfg (CallbacksCfg): Configuration for callbacks.
@@ -98,7 +96,7 @@ def init_sb3_callbacks(
     callbacks = []
 
     # Add curriculum callback if staging is enabled
-    if "staged" in tm_modules and task_cfg and task_cfg.staged and task_cfg.staged.curriculum_definition and task_cfg.staged.stage_ticks is None:
+    if task_cfg and task_cfg.runs_module("staged") and task_cfg.staged and task_cfg.staged.curriculum_definition and task_cfg.staged.stage_ticks is None:
         curriculum_stages = curriculum_stage_lists(task_cfg)
         if curriculum_stages:
             curriculum_cb = StagedTrainCallback(
@@ -112,11 +110,7 @@ def init_sb3_callbacks(
                 timeout=task_cfg.staged.timeout,
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
-                tm_dict={
-                    "tm_robots": task_cfg.tm_robots,
-                    "tm_obstacles": task_cfg.tm_obstacles,
-                    "tm_modules": task_cfg.tm_modules,
-                },
+                modes=task_cfg.modes,
             )
             callbacks.append(curriculum_cb)
 

@@ -170,11 +170,7 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
             staged_cfg=staged,
             num_envs=general_cfg.n_envs,
             verbose=int(general_cfg.verbose),
-            tm_dict={
-                "tm_robots": task_cfg.tm_robots,
-                "tm_obstacles": task_cfg.tm_obstacles,
-                "tm_modules": task_cfg.tm_modules,
-            },
+            modes=task_cfg.modes,
         )
         logger.info(
             "[Setup] Curriculum learning enabled, %d stages, threshold_type=%s, advance>=%.2f, retreat<=%.2f",

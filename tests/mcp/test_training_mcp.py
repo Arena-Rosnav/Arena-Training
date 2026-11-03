@@ -102,6 +102,13 @@ def test_validate_reports_a_bad_value_and_bad_yaml():
     assert not training_validate(yaml_text="- a list\n")["valid"]
 
 
+def test_validate_names_a_task_mode_the_runtime_would_not_run():
+    text = (CONFIGS / "sb_training_config.yaml").read_text().replace("robots: random", "robots: no_such_mode", 1)
+    out = training_validate(yaml_text=text)
+    assert not out["valid"]
+    assert "no_such_mode" in out["errors"][0]["msg"]
+
+
 def test_validate_needs_exactly_one_source():
     with pytest.raises(ToolError, match="exactly one"):
         training_validate()

@@ -233,7 +233,6 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
             node=self._supervisor_node,
             eval_env=environment.eval_env,
             n_envs=self.config.arena_cfg.general.n_envs,
-            tm_modules=self.config.arena_cfg.task.tm_modules,
             callback_cfg=callback_cfg,
             task_cfg=self.config.arena_cfg.task,
             model_save_path=str(self.paths[Paths.Agent].path),
@@ -244,7 +243,7 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
         )
         self.tick_callbacks: list[BaseCallback] = []
         task_cfg = self.config.arena_cfg.task
-        if "staged" in task_cfg.tm_modules and task_cfg.staged is not None and task_cfg.staged.stage_ticks is not None:
+        if task_cfg.runs_module("staged") and task_cfg.staged is not None and task_cfg.staged.stage_ticks is not None:
             self.tick_callbacks.append(
                 TickScheduledCurriculum(
                     node=self._supervisor_node,
@@ -255,7 +254,7 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
                     parameter_node_template=task_cfg.staged.parameter_node_template,
                     timeout=task_cfg.staged.timeout,
                     verbose=1,
-                    tm_dict={"tm_robots": task_cfg.tm_robots, "tm_obstacles": task_cfg.tm_obstacles, "tm_modules": task_cfg.tm_modules},
+                    modes=task_cfg.modes,
                 )
             )
         if arena_sb3_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:
