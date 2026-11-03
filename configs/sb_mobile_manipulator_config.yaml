@@ -144,9 +144,10 @@ arena_cfg:
 
   # task modules configuration
   task:
-    tm_modules: staged  # Task module setup (staged for curriculum learning)
-    tm_obstacles: random  # Obstacle generation method (random placement)
-    tm_robots: random  # Robot spawning method (random positions)
+    modes:
+      robots: random  # Robot spawning method (random positions)
+      obstacles: random  # Obstacle generation method (random placement)
+      modules: staged  # Task module setup (staged for curriculum learning)
 
     staged:
       starting_stage: 1
@@ -154,7 +155,7 @@ arena_cfg:
       upper_threshold: 0.9  # Performance threshold to advance to next stage
       lower_threshold: 0.3  # Performance threshold to stay at current stage
 
-      parameter_node_template: "/arena/env_{i}/task_generator_node"  # FQN of per-env task_generator node (set by arena_runtime registry)
+      parameter_node_template: "/arena/env_{i}/arena_env_node"  # FQN of per-env task_generator node (set by arena_runtime registry)
       timeout: 5.0  # Timeout for ROS2 parameter service calls (seconds)
       curriculum_definition:
         # Stage 1: No obstacles (safe start)

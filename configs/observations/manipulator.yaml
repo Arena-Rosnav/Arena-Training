@@ -108,7 +108,7 @@ datasources:
   # people_detections:
   #   type: people_msgs/People          # → PedestrianDetections
   #   params:
-  #     topic: "/task_generator_node/people"                  # People tracker output
+  #     topic: "/arena_env_node/people"                  # People tracker output
   #     up_to_date_required: false
 
   # Arena pedestrian detection (arena_people_msgs)
