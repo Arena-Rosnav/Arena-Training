@@ -83,7 +83,7 @@ Same arg surface as `arena train` — the CLI verb is just a thin wrapper.
 
 ### Training script (standalone)
 
-For development without a simulator (no env spawning, no service calls), invoke the script directly. This runs the trainer logic against whatever envs already exist; `train_agent.py` will fail at `/arena/spawn_env` if arena_node is not running.
+For development without a simulator (no env spawning, no service calls), invoke the script directly. This runs the trainer logic against whatever envs already exist; `train_agent.py` will fail at `/arena/spawn_env` if arena_runtime_node is not running.
 
 ```bash
 # Default config (sb_training_config.yaml)
@@ -147,6 +147,8 @@ Configs are Pydantic-validated YAML. Top-level keys:
 arena_cfg:       # simulation / task / robot / monitoring settings
 agent_cfg:       # rosnav_rl agent: framework, observation spaces, action space
 ```
+
+`arena_cfg.task.modes` maps a task axis to comma-separated mode names (`robots`, `obstacles`, `modules`). The curriculum queues the listed axes through `QueueEpisode.modes`, an axis left out keeps the env's selection, and the config validates each name against the task runtime's mode vocabulary. Curriculum stage keys named `task.<mode>.<leaf>` go through `QueueEpisode.params` under the param namespace the env's `QueryTaskModes.namespaces` reports for `<mode>`. The legacy keys `tm_robots`, `tm_obstacles` and `tm_modules` are still read and mapped onto `modes`.
 
 ## Troubleshooting
 

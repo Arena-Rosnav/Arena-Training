@@ -68,10 +68,14 @@ def _errors(exc: Exception) -> list[dict[str, object]]:
 
 
 def _load(path: Path) -> tuple[TrainingCfg, dict[str, object]]:
+    from arena_runtime.env.task_layer import task_layer
+
     from arena_training.arena_rosnav_rl.utils.config import load_training_config
 
     raw = _raw(path)
-    return load_training_config(str(path)), raw
+    config = load_training_config(str(path))
+    task_layer().validate_modes(config.arena_cfg.task.env_mode_names())
+    return config, raw
 
 
 def _jsonable(value: object) -> object:

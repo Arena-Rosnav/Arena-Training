@@ -16,8 +16,10 @@ import rclpy.qos
 import rclpy.time
 import yaml
 from arena_rclpy_mixins.Time import Time
+from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
+from arena_runtime_msgs.srv import ResetEpisode
 from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
 from rclpy.action import ActionClient
@@ -39,8 +41,6 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.utils.logging import flush_errors_decorator
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
-from task_generator_msgs.msg import EpisodeRecord, RobotFleet
-from task_generator_msgs.srv import ResetEpisode
 from trajectory_msgs.msg import JointTrajectory
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
@@ -125,7 +125,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     Attributes:
         node (SupervisorNode): The ROS2 node used for communication.
-        env_ns (Namespace): The env's task_generator_node namespace (lifecycle/state).
+        env_ns (Namespace): The env's arena_env_node namespace (lifecycle/state).
         robot_ns (Namespace): The robot's namespace (cmd_vel, sensor topics). Set by `_resolve_robot`.
         action_space (gymnasium.spaces.Space): The action space, defined by the space manager.
         observation_space (gymnasium.spaces.Space): The observation space, defined by the space manager.
