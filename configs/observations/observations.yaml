@@ -249,6 +249,9 @@ datasources:
   crowd_ttc:
     type: CrowdTimeToContactGenerator      # Time to contact against the measured robot velocity
 
+  crowd_spectral:
+    type: CrowdSpectralGenerator # Computes 15 spectral crowd-graph scalars 
+    
 # =============================================================================
 # CONFIGURATION EXAMPLES & USAGE PATTERNS
 # =============================================================================
