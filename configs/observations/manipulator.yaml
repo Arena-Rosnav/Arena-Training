@@ -142,9 +142,9 @@ datasources:
       up_to_date_required: true
 
   gripper_state:
-    type:
+    type: GripperStateCollector
     params:
-      topic:
+      topic: "gripper_controller/gripper_cmd/_action/feedback"
       up_to_date_required: true
   
   last_arm_action:
