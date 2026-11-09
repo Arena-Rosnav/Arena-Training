@@ -15,6 +15,7 @@ import rclpy.parameter
 import rclpy.qos
 import rclpy.time
 import yaml
+from arena_rclpy_mixins.params import Param, Range, declare
 from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
@@ -136,12 +137,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     metadata = {"render_modes": ["human"]}
 
-    _TIMEOUT_PARAM_DEFAULTS = {
-        "reset_task_timeout": 30.0,
-        "service_wait_timeout": 30.0,
-        "episode_wait_timeout": 60.0,
-        "fleet_wait_timeout": 60.0,
-    }
+    _TIMEOUT_PARAMS = (
+        Param[float]("reset_task_timeout", 30.0, "Seconds to wait for the reset task service (negative = no limit)."),
+        Param[float]("service_wait_timeout", 30.0, "Seconds to wait for a runtime service to appear (negative = no limit)."),
+        Param[float]("episode_wait_timeout", 60.0, "Seconds to wait for the next episode to start (negative = no limit)."),
+        Param[float]("fleet_wait_timeout", 60.0, "Seconds to wait for the robot fleet to be published (negative = no limit)."),
+    )
 
     def __init__(
         self,
@@ -377,27 +378,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
     def _declare_timeout_params(self) -> None:
-        for name, default in self._TIMEOUT_PARAM_DEFAULTS.items():
-            if not self.node.has_parameter(name):
-                self.node.declare_parameter(name, default)
+        self._timeouts = {param.name: declare(self.node, param) for param in self._TIMEOUT_PARAMS}
 
     def _declare_lockstep_params(self) -> None:
-        for name, default in (
-            ("lockstep", self._lockstep),
-            ("lockstep_step_seconds", self._lockstep_step_seconds),
-        ):
-            if not self.node.has_parameter(name):
-                self.node.declare_parameter(name, default)
-        self._lockstep = bool(self.node.get_parameter("lockstep").value)
-        step_seconds = self.node.get_parameter("lockstep_step_seconds").value
-        assert isinstance(step_seconds, (int, float))
-        self._lockstep_step_seconds = float(step_seconds)
+        self._lockstep = declare(self.node, Param[bool]("lockstep", self._lockstep, "Hold the sim between gym steps and advance it by lockstep_step_seconds per step.")).value
+        self._lockstep_step_seconds = declare(self.node, Param[float]("lockstep_step_seconds", self._lockstep_step_seconds, "Sim seconds one gym step advances in lockstep.", constraint=Range(lo=0.0, lo_open=True))).value
 
     def _timeout_param(self, name: str) -> float | None:
         """Read a timeout ROS param. Negative sentinel means infinite (None)."""
-        val = self.node.get_parameter(name).value
-        assert isinstance(val, (int, float))
-        return None if val < 0 else float(val)
+        val = self._timeouts[name].value
+        return None if val < 0 else val
 
     def _setup_observation_manager(self):
         """Configures and initializes the ObservationManager."""
