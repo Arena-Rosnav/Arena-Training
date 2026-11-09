@@ -1,6 +1,7 @@
 import launch
 from arena_bringup.actions import IncludeLaunchDescriptionForward
-from arena_bringup.substitutions import LaunchArgument, deprecated_launch_args
+from arena_rclpy_mixins.launch_argument import LaunchArgument
+from arena_bringup.substitutions import deprecated_launch_args
 from launch.actions import ExecuteProcess, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import PathJoinSubstitution
@@ -19,7 +20,7 @@ def generate_launch_description():
     LaunchArgument(
         name='robot.mobile',
         default_value='rosnav_rl',
-        description='Mobile adapter for training envs. Override only if train_agent will not be driving cmd_vel.',
+        description='Mobile adapter of the training envs.',
     )
 
     arena_launch = IncludeLaunchDescriptionForward(
