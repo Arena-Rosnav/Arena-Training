@@ -160,7 +160,29 @@ datasources:
   arm_base_color:
     type: ImageColorCollector
     params:
-      topic: "arm_base_camera/image"  
+      topic: "arm_base_camera/image"
+
+  left_fingertip_contact:
+    type: ContactCollector
+    params:
+      topic: "gripper_left_finger/contact"
+      timeout: 0.2
+      up_to_date_required: false  
+
+  right_fingertip_contact:
+    type: ContactCollector
+    params:
+      topic: "gripper_right_finger/contact"
+      timeout: 0.2
+      up_to_date_required: false
+  
+  grasp_state:
+    type: GraspStateGenerator
+    params:
+      left_frame: "robot_gripper_robotiq_85_left_finger_tip_link"
+      right_frame: "robot_gripper_robotiq_85_right_finger_tip_link"
+      inside_tolerance: 0.0
+      min_normal_alignment: 0.5
   
 
   # ---------------------------------------------------------------------------
