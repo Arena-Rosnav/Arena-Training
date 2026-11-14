@@ -68,7 +68,6 @@ datasources:
   front_laser:
     type: sensor_msgs/LaserScan        # → LidarRanges
     params:
-      topic: "lidar"                    # Primary lidar topic
       up_to_date_required: true        # Critical for obstacle avoidance
 
   wrist_color:

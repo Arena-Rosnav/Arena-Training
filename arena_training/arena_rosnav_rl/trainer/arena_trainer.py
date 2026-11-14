@@ -359,6 +359,11 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         return self.__resume
 
     @property
+    def env_nodes(self) -> list[str]:
+        """Fully qualified env node names of the spawned envs."""
+        return [f"/{self.namespace_fn(i).lstrip('/')}" for i in range(self.config.arena_cfg.general.n_envs)]
+
+    @property
     def node(self) -> SupervisorNode:
         """Return the supervisor node for this trainer."""
         return self._supervisor_node

@@ -120,6 +120,7 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
             rl_agent=self.agent,
             n_envs=general_cfg.n_envs,
             max_steps=general_cfg.max_num_moves_per_eps,
+            robot_cfg=self.config.arena_cfg.robot,
             init_env_by_call=False,
             namespace_fn=self.namespace_fn,
             simulation_state_container=self.agent_parameters,
@@ -168,7 +169,7 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
         self._curriculum = DreamerV3Curriculum(
             node=self.node,
             staged_cfg=staged,
-            num_envs=general_cfg.n_envs,
+            env_nodes=self.env_nodes,
             verbose=int(general_cfg.verbose),
             modes=task_cfg.env_mode_names(),
         )

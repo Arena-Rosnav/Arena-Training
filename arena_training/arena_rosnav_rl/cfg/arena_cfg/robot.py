@@ -5,6 +5,7 @@ import attrs
 from arena_robots.assembly import RequestPart
 from arena_robots.caps import MobileSpec, RobotCaps
 from arena_robots.Robot import RobotView
+from arena_robots.Sensor import SensorType
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
@@ -42,6 +43,14 @@ class RobotCfg(BaseModel):
         """The ``robot:=`` launch argument requesting this model with its parts."""
         requests = [f"{part.mount}={category}/{part.variant}" if part.mount else f"{category}={part.variant}" for category, parts in self.parts.items() for part in parts]
         return f"robot:={self.robot_model}[{','.join(requests)}]" if requests else f"robot:={self.robot_model}"
+
+    @property
+    def laser_topic(self) -> str | None:
+        """Namespace-relative topic of the first laserscan sensor of the resolved robot."""
+        assert self.view is not None
+        sensors = self.view.effective_sensors(self.parts, frames=self.frames or None)
+        topic = next((sensor.topic for sensor in sensors if sensor.type == SensorType.LASERSCAN), None)
+        return None if topic is None else topic.removeprefix("${namespace}/")
 
     def model_post_init(self, context: object, /) -> None:
         if self.view is None:

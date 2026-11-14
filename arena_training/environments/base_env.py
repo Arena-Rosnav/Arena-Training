@@ -44,12 +44,15 @@ from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
 from trajectory_msgs.msg import JointTrajectory
 
+from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
     get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
+    set_laser_topic,
+    stow_duration,
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
@@ -159,6 +162,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         observations_config: str | None = None,
         lockstep: bool = False,
         lockstep_step_seconds: float = 0.0999,
+        robot_cfg: RobotCfg | None = None,
         *args: object,
         **kwargs: object,
     ):
@@ -187,6 +191,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             lockstep (bool): Default of the `lockstep` node parameter. Defaults to False.
             lockstep_step_seconds (float): Default of the `lockstep_step_seconds` node parameter.
                 Defaults to 0.0999.
+            robot_cfg (Optional[RobotCfg]): The robot with its parts. If None, the fleet's robot model with default parts.
         """
         super().__init__()
         self._node = node
@@ -208,6 +213,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
         self.__observations_config_path = observations_config
+        self._robot_cfg = robot_cfg
 
         self._steps_curr_episode = 0
         self._episode_reward_terms: dict[str, float] = {}
@@ -307,6 +313,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         robot = self._latest_fleet.robots[0].descriptor  # pyright: ignore[reportIndexIssue]
         self._robot_name = robot.name
+        if self._robot_cfg is None:
+            self._robot_cfg = RobotCfg(robot_model=robot.model)
         self.robot_ns = Namespace(robot.ns)
         base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
         self.robot_source_frame = posixpath.join(robot.frame, base_frame)
@@ -408,6 +416,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if arms:
             set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
         set_pedestrians_topic(config, self.robot_ns.to_string())
+        assert self._robot_cfg is not None
+        set_laser_topic(config, self._robot_cfg.laser_topic)
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
@@ -460,6 +470,15 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         spec = self._model_space_manager.action_space_manager.spec
         specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
         return [s for s in specs if isinstance(s, ManipulatorActionSpace)]
+
+    def _stow_seconds(self, arm: ManipulatorActionSpace) -> float:
+        """Seconds a stow trajectory of *arm* takes within its joint velocity limits."""
+        assert self._robot_cfg is not None
+        assert self._robot_cfg.effective_caps is not None
+        assert arm.stow_positions is not None
+        caps = (self._robot_cfg.effective_caps.arm or {}).values()
+        joint_limits = next((caps_arm.joint_limits for caps_arm in caps if caps_arm.controller == arm.controller), {})
+        return stow_duration(arm.joint_names, arm.stow_positions, arm.position_limits, joint_limits)
 
     def _gripper_specs(self) -> list[GripperActionSpace]:
         """The gripper sub-spaces of the action space."""
@@ -628,7 +647,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         for arm in self._arm_specs():
             if arm.stow_positions is not None and arm.controller in self._joint_trajectory_pubs:
-                self._joint_trajectory_pubs[arm.controller].publish(get_joint_trajectory_from_action(np.asarray(arm.stow_positions), arm.joint_names))
+                trajectory = get_joint_trajectory_from_action(np.asarray(arm.stow_positions), arm.joint_names, self._stow_seconds(arm))
+                self._joint_trajectory_pubs[arm.controller].publish(trajectory)
 
         self._last_step_time = None
 

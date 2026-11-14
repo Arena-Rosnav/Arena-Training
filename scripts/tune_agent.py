@@ -28,6 +28,8 @@ from pathlib import Path
 import yaml
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.general import GeneralCfg
+from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
+from arena_training.arena_rosnav_rl.utils.launch_args import env_launch_args
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
 
 logging.basicConfig(
@@ -305,9 +307,10 @@ def main() -> int:
 
     wait_for_simulation(timeout=120.0)
 
-    n_envs: int = base_config_dict["arena_cfg"]["general"]["n_envs"]
-    clearance = GeneralCfg.model_validate(base_config_dict["arena_cfg"]["general"]).safety_distance
-    per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", f"task.episode.spawn.robot_clearance:={clearance}"] for _ in range(n_envs)]
+    general = GeneralCfg.model_validate(base_config_dict["arena_cfg"]["general"])
+    robot = RobotCfg.model_validate(base_config_dict["arena_cfg"].get("robot", {}))
+    per_env_launch_args = env_launch_args(general, robot)
+    n_envs = general.n_envs
     env_map = spawn_envs(n_envs, per_env_launch_args)
 
     def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
