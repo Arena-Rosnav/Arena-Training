@@ -853,6 +853,10 @@ dev = [
     { name = "matplotlib", specifier = ">=3.0.0" },
     { name = "pyinstrument", specifier = ">=5.0.3" },
 ]
+reachability = [
+    { name = "hj-reachability", specifier = "==0.7.0" },
+    { name = "jax", extras = ["cpu"], specifier = "==0.6.2" },
+]
 tuning = [{ name = "optuna", specifier = ">=3.0.0" }]
 
 [[package]]
