@@ -39,6 +39,15 @@ def action_ranges(robot: MobileSpec) -> tuple[tuple[float, float], tuple[float, 
     return (limits.linear.min, limits.linear.max), (lateral.min, lateral.max), (limits.angular.min, limits.angular.max)
 
 
+def command_ranges(space: DifferentialDriveActionSpace | OmnidirectionalActionSpace) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """(linear, lateral, angular) bounds of a mobile action space, lateral equal to linear on a differential drive."""
+    from rosnav_rl.cfg.action_spaces import OmnidirectionalActionSpace
+
+    if isinstance(space, OmnidirectionalActionSpace):
+        return space.linear_range_x, space.linear_range_y, space.angular_range
+    return space.linear_range, space.linear_range, space.angular_range
+
+
 def mobile_action_space(robot: MobileSpec, configured: ActionSpaceSpec | None) -> DifferentialDriveActionSpace | OmnidirectionalActionSpace:
     """The agent_config action_space when the YAML sets a mobile one, else the robot's rated velocity_limits."""
     from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, OmnidirectionalActionSpace
@@ -273,8 +282,8 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         assert caps is not None
         assert robot_desc is not None
         general = self.config.arena_cfg.general
-        linear, _lateral, angular = action_ranges(robot_desc)
         action_space = mobile_action_space(robot_desc, self.config.agent_config.action_space)
+        linear, lateral, angular = command_ranges(action_space)
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
@@ -298,7 +307,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,
         # normalizer, and any other overrides), then stamp in the
-        # hardware-derived values which must always come from the robot desc.
+        # values that must always come from the robot desc and the action space.
         parameters = self.config.agent_config.parameters.model_copy(
             update=dict(
                 laser_num_beams=laser.num_beams,
@@ -309,8 +318,8 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
                 max_linear_vel=linear[1],
                 min_angular_vel=angular[0],
                 max_angular_vel=angular[1],
-                min_translational_vel=linear[0],
-                max_translational_vel=linear[1],
+                min_translational_vel=lateral[0],
+                max_translational_vel=lateral[1],
                 robot_radius=robot_desc.radius,
                 safety_distance=general.safety_distance,
                 goal_radius=general.goal_radius,

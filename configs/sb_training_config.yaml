@@ -54,8 +54,8 @@ agent_config:
     normalization: null  # Input normalization parameters (if needed)
 
   # Observation pipeline tunables - robot-hardware fields are overwritten
-  # automatically from the robot description at training time; only these
-  # two normalization settings are kept from the YAML.
+  # automatically from the robot description and the action space at
+  # training time; only these two normalization settings are kept from the YAML.
   parameters:
     normalize: true      # normalise all observation values to [-1, 1] / [0, 1]
     normalizer: max_abs  # max_abs | min_max | standard | identity
