@@ -42,4 +42,4 @@ def test_the_saved_training_config_records_the_normalized_actions(tmp_path):
     trainer._populate_agent_spec()
     config.to_yaml(tmp_path / "training_config.yaml")
 
-    assert "normalized_actions: true" in (tmp_path / "training_config.yaml").read_text()
+    assert load_training_config(str(tmp_path / "training_config.yaml")).agent_config.normalized_actions

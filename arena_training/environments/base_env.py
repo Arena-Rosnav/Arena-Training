@@ -14,7 +14,6 @@ import rclpy.callback_groups
 import rclpy.parameter
 import rclpy.qos
 import rclpy.time
-import yaml
 from arena_rclpy_mixins.params import Param, Range, declare
 from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
@@ -42,6 +41,7 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.utils.logging import flush_errors_decorator
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
+from rosnav_rl.utils.yaml_io import load_yaml
 from trajectory_msgs.msg import JointTrajectory
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
@@ -406,8 +406,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if obs_config_path is None:
             obs_config_path = str(importlib.resources.files("rosnav_rl") / "observations" / "observations.yaml")
 
-        with open(obs_config_path) as file:
-            config = yaml.safe_load(file)
+        config = load_yaml(obs_config_path)
 
         assert self.robot_source_frame is not None
         assert self.robot_ns is not None

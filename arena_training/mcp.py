@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from pydantic import Field
+from rosnav_rl.utils.yaml_io import YAMLError, dumps_yaml, load_yaml
 
 from arena_mcp.core import JOBS, ROS, Domain, Job, ToolError, cli
 from arena_mcp.core.envs import RUNTIME
@@ -51,9 +52,8 @@ def _resolve_config(name_or_path: str) -> Path:
 
 
 def _raw(path: Path) -> dict[str, object]:
-    from arena_training.arena_rosnav_rl.utils.training import load_config
 
-    raw = load_config(str(path))
+    raw = load_yaml(path)
     if not isinstance(raw, dict):
         raise ValueError(f"{path} holds a {type(raw).__name__}, a training config is a mapping with arena_cfg and agent_config")
     return raw
@@ -106,7 +106,6 @@ def _summary(config: TrainingCfg, raw: dict[str, object]) -> dict[str, object]:
 
 def _validated(path: Path) -> tuple[TrainingCfg, dict[str, object]]:
     from pydantic import ValidationError
-    from yaml import YAMLError
 
     try:
         return _load(path)
@@ -117,7 +116,6 @@ def _validated(path: Path) -> tuple[TrainingCfg, dict[str, object]]:
 
 def _checked(path: Path) -> dict[str, object]:
     from pydantic import ValidationError
-    from yaml import YAMLError
 
     try:
         config, raw = _load(path)
@@ -243,8 +241,6 @@ def training_validate(
         return {"source": str(resolved), **_checked(resolved)}
     if yaml_text is None or path is not None:
         raise ToolError("pass exactly one of yaml_text or path")
-    import yaml
-    from yaml import YAMLError
 
     with tempfile.TemporaryDirectory(prefix="training_validate_") as tmp:
         target = Path(tmp) / "config.yaml"
@@ -258,7 +254,7 @@ def training_validate(
             observations = agent.get("observations_config")
             if isinstance(observations, str) and not Path(observations).is_absolute():
                 agent["observations_config"] = str(Path(base_dir).expanduser() / observations if base_dir else _configs_dir() / observations)
-                target.write_text(yaml.safe_dump(raw, sort_keys=False))
+                target.write_text(dumps_yaml(raw))
         return {"source": "yaml_text", **_checked(target)}
 
 

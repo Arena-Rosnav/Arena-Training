@@ -7,7 +7,7 @@ import types
 
 import pytest
 import rclpy
-import yaml
+from rosnav_rl.utils.yaml_io import loads_yaml
 from rclpy.node import Node
 from rosnav_rl.cfg.action_spaces import CompositeActionSpace, DiscretizationCfg, ManipulatorActionSpace, GripperActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
@@ -78,7 +78,7 @@ def test_discrete_drive_actions_cannot_drive_an_arm():
 
 
 def test_the_manipulator_observations_build_the_arm_datasources(node):
-    config = yaml.safe_load((CONFIGS / "observations" / "manipulator.yaml").read_text())
+    config = loads_yaml((CONFIGS / "observations" / "manipulator.yaml").read_text())
     set_robot_pose_frames(config, "env_0/rbkairos", "base_link")
     set_end_effector_frames(config, "env_0/rbkairos", "robot_arm_tool0")
 
