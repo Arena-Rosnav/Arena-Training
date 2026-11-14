@@ -16,7 +16,7 @@ from rclpy.node import Node
 from arena_training.environments.base_env import acquire_hold
 
 SERVICE = "/hold_acquire_test/sim_lifecycle/hold"
-TIMEOUT = 0.5
+TIMEOUT = 2.0
 
 
 @pytest.fixture
@@ -24,15 +24,19 @@ def hold_server():
     if not rclpy.ok():
         rclpy.init()
     registry = HoldRegistry()
-    delayed = {"acquires": 0}
+    delayed = {"acquires": 0, "inflight": 0}
     server = Node("hold_acquire_test_server")
 
     def handle(request: LifecycleHold.Request, response: LifecycleHold.Response) -> LifecycleHold.Response:
         if request.action == LifecycleHold.Request.ACQUIRE:
-            count = registry.acquire(request.caller_id, request.reason)
-            delayed["acquires"] += 1
-            if delayed["acquires"] == 1:
-                time.sleep(1.6 * TIMEOUT)
+            delayed["inflight"] += 1
+            try:
+                count = registry.acquire(request.caller_id, request.reason)
+                delayed["acquires"] += 1
+                if delayed["acquires"] == 1:
+                    time.sleep(1.6 * TIMEOUT)
+            finally:
+                delayed["inflight"] -= 1
         else:
             count = registry.release(request.caller_id, request.reason)
         response.paused = not registry.is_empty()
@@ -56,7 +60,10 @@ def hold_server():
 def test_late_acquire_response_leaves_exactly_one_hold(hold_server):
     registry, client, delayed = hold_server
     acquire_hold(client, "/arena/env_0/env", "training", TIMEOUT)
-    time.sleep(4 * TIMEOUT)
+    deadline = time.monotonic() + 30.0
+    while (delayed["acquires"] < 2 or delayed["inflight"]) and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert delayed["acquires"] == 2
+    assert delayed["inflight"] == 0
     assert registry.has("/arena/env_0/env", "training")
     assert registry.total_count() == 1

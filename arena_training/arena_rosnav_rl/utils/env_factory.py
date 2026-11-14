@@ -16,6 +16,7 @@ from ..cfg import (
     GeneralCfg,
     MonitoringCfg,
     ProfilingCfg,
+    RobotCfg,
 )
 from ..node import SupervisorNode
 from ..stable_baselines3.vec_wrapper import (
@@ -45,6 +46,7 @@ def _init_env_fnc(
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
+    robot_cfg: RobotCfg | None = None,
     init_by_call: bool = False,
     obs_unit_kwargs: dict | None = None,
     seed: int = 0,
@@ -59,6 +61,7 @@ def _init_env_fnc(
             reward_function=reward_function,
             simulation_state_container=simulation_state_container,
             max_steps_per_episode=max_steps_per_episode,
+            robot_cfg=robot_cfg,
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
             wait_for_obs=True,
@@ -78,6 +81,7 @@ def _test_init_env_fnc(
     reward_function: rosnav_rl.RewardFunction,
     simulation_state_container: rosnav_rl.AgentParameters,
     max_steps_per_episode: int,
+    robot_cfg: RobotCfg | None = None,
     node: SupervisorNode | None = None,
     init_by_call: bool = False,
     obs_unit_kwargs: dict | None = None,
@@ -96,6 +100,7 @@ def _test_init_env_fnc(
             reward_function=reward_function,
             simulation_state_container=simulation_state_container,
             max_steps_per_episode=max_steps_per_episode,
+            robot_cfg=robot_cfg,
             init_by_call=init_by_call,
             obs_unit_kwargs=obs_unit_kwargs,
             observations_config=observations_config,
@@ -164,6 +169,7 @@ def make_envs(
     simulation_state_container: rosnav_rl.AgentParameters,
     n_envs: int,
     max_steps: int,
+    robot_cfg: RobotCfg,
     init_env_by_call: bool,
     namespace_fn: Callable[[int], str],
     node: SupervisorNode | None = None,
@@ -180,6 +186,7 @@ def make_envs(
         simulation_state_container: AgentParameters shared across environments.
         n_envs: Number of environments to create.
         max_steps: Maximum steps per episode.
+        robot_cfg: The trained robot with its parts.
         init_env_by_call: If True, environments initialize when their function is called.
         namespace_fn: Function mapping index → environment namespace string.
         wrappers: Optional gym wrappers to apply to each environment.
@@ -203,6 +210,7 @@ def make_envs(
             reward_function=reward_function.copy(),
             simulation_state_container=simulation_state_container,
             max_steps_per_episode=max_steps,
+            robot_cfg=robot_cfg,
             init_by_call=init_env_by_call,
             wrappers=wrappers,
             observations_config=observations_config,

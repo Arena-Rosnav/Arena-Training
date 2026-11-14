@@ -184,6 +184,7 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
             rl_agent=self.agent,
             n_envs=self.config.arena_cfg.general.n_envs,
             max_steps=self.config.arena_cfg.general.max_num_moves_per_eps,
+            robot_cfg=self.config.arena_cfg.robot,
             init_env_by_call=False,
             namespace_fn=self.namespace_fn,
             simulation_state_container=self.agent_parameters,
@@ -232,8 +233,7 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
         self.eval_cb = init_sb3_callbacks(
             node=self._supervisor_node,
             eval_env=environment.eval_env,
-            n_envs=self.config.arena_cfg.general.n_envs,
-            tm_modules=self.config.arena_cfg.task.tm_modules,
+            env_nodes=self.env_nodes,
             callback_cfg=callback_cfg,
             task_cfg=self.config.arena_cfg.task,
             model_save_path=str(self.paths[Paths.Agent].path),
@@ -244,18 +244,17 @@ class StableBaselines3Trainer(ArenaTrainer[SB3Environment]):
         )
         self.tick_callbacks: list[BaseCallback] = []
         task_cfg = self.config.arena_cfg.task
-        if "staged" in task_cfg.tm_modules and task_cfg.staged is not None and task_cfg.staged.stage_ticks is not None:
+        if task_cfg.runs_module("staged") and task_cfg.staged is not None and task_cfg.staged.stage_ticks is not None:
             self.tick_callbacks.append(
                 TickScheduledCurriculum(
                     node=self._supervisor_node,
                     train_stages=curriculum_stage_lists(task_cfg),
                     stage_ticks=task_cfg.staged.stage_ticks,
                     ticks_per_step=chunk,
-                    num_envs=self.config.arena_cfg.general.n_envs,
-                    parameter_node_template=task_cfg.staged.parameter_node_template,
+                    env_nodes=self.env_nodes,
                     timeout=task_cfg.staged.timeout,
                     verbose=1,
-                    tm_dict={"tm_robots": task_cfg.tm_robots, "tm_obstacles": task_cfg.tm_obstacles, "tm_modules": task_cfg.tm_modules},
+                    modes=task_cfg.env_mode_names(),
                 )
             )
         if arena_sb3_cfg.callbacks.checkpoint_ticks and not self.config.arena_cfg.general.debug_mode:

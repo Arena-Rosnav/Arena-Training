@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.reward.reward_function import RewardFunction
-from task_generator_msgs.msg import EpisodeRecord
+from arena_runtime_msgs.msg import EpisodeRecord
 
 from arena_training.environments.base_env import goal_tolerance
 

@@ -25,9 +25,11 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-import yaml
+from rosnav_rl.utils.yaml_io import load_yaml, dump_yaml
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.general import GeneralCfg
+from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
+from arena_training.arena_rosnav_rl.utils.launch_args import env_launch_args
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
 
 logging.basicConfig(
@@ -35,11 +37,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def _load_yaml(path: Path) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 
 def _build_optuna_pruner(pruner_cfg):
@@ -292,22 +289,23 @@ def main() -> int:
 
     from rosnav_rl.tuning import TuningCfg
 
-    tuning_cfg = TuningCfg.model_validate(_load_yaml(args.config))
+    tuning_cfg = TuningCfg.model_validate(load_yaml(args.config))
     if args.n_trials is not None:
         tuning_cfg.n_trials = args.n_trials
 
     base_config_path = _resolve_base_config(args.config, tuning_cfg.base_config)
     logger.info("Base training config: %s", base_config_path)
-    base_config_dict = _load_yaml(base_config_path)
+    base_config_dict = load_yaml(base_config_path)
     obs_cfg = base_config_dict.get("agent_config", {}).get("observations_config")
     if obs_cfg and not Path(obs_cfg).is_absolute():
         base_config_dict["agent_config"]["observations_config"] = str(base_config_path.parent / obs_cfg)
 
     wait_for_simulation(timeout=120.0)
 
-    n_envs: int = base_config_dict["arena_cfg"]["general"]["n_envs"]
-    clearance = GeneralCfg.model_validate(base_config_dict["arena_cfg"]["general"]).safety_distance
-    per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", f"task.episode.spawn.robot_clearance:={clearance}"] for _ in range(n_envs)]
+    general = GeneralCfg.model_validate(base_config_dict["arena_cfg"]["general"])
+    robot = RobotCfg.model_validate(base_config_dict["arena_cfg"].get("robot", {}))
+    per_env_launch_args = env_launch_args(general, robot)
+    n_envs = general.n_envs
     env_map = spawn_envs(n_envs, per_env_launch_args)
 
     def namespace_fn(idx: int, m: dict[int, str] = env_map) -> str:
@@ -346,17 +344,15 @@ def main() -> int:
     logger.info("=" * 70)
 
     output_path = args.config.parent / f"{tuning_cfg.study_name}_best_params.yaml"
-    with open(output_path, "w") as f:
-        yaml.dump(
-            {
-                "study_name": tuning_cfg.study_name,
-                "best_trial": study.best_trial.number,
-                "best_value": study.best_trial.value,
-                "best_params": study.best_trial.params,
-            },
-            f,
-            default_flow_style=False,
-        )
+    dump_yaml(
+        {
+            "study_name": tuning_cfg.study_name,
+            "best_trial": study.best_trial.number,
+            "best_value": study.best_trial.value,
+            "best_params": study.best_trial.params,
+        },
+        output_path,
+    )
     logger.info("Best parameters saved to %s", output_path)
     return 0
 

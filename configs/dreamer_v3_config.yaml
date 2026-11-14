@@ -285,16 +285,16 @@ arena_cfg:
       tags: null
 
   task:
-    tm_modules: staged
-    tm_obstacles: random
-    tm_robots: random
+    modes:
+      robots: random
+      obstacles: random
+      modules: staged
 
     staged:
       starting_stage: 1
       threshold_type: succ
       upper_threshold: 0.85
       lower_threshold: 0.3
-      parameter_node_template: "/arena/env_{i}/task_generator_node"
       timeout: 5.0
       curriculum_definition:
         # Stage 0: 3 pedestrians + open map

@@ -63,7 +63,6 @@ datasources:
   front_laser:
     type: sensor_msgs/LaserScan        # → LidarRanges
     params:
-      topic: "lidar"                    # Primary lidar topic
       up_to_date_required: true        # Critical for obstacle avoidance
 
   # Navigation target collectors  
@@ -93,7 +92,7 @@ datasources:
   # people_detections:
   #   type: people_msgs/People          # → PedestrianDetections
   #   params:
-  #     topic: "/task_generator_node/people"                  # People tracker output
+  #     topic: "/arena_env_node/people"                  # People tracker output
   #     up_to_date_required: false
 
   # Arena pedestrian detection (arena_people_msgs)
@@ -248,6 +247,9 @@ datasources:
 
   crowd_ttc:
     type: CrowdTimeToContactGenerator      # Time to contact against the measured robot velocity
+
+  crowd_reachability:
+    type: CrowdReachabilityGenerator       # Share of the robot's candidate velocities blocked within 3 s
 
   pedestrian_tube_values:
     type: PedestrianTubeValueGenerator     # HJ reachability tube value per pedestrian, from the offline-solved table
