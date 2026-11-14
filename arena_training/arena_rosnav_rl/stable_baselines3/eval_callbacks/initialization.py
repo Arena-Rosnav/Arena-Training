@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from rosnav_rl.utils.stable_baselines3.callbacks import (
@@ -62,8 +62,7 @@ def curriculum_stage_lists(task_cfg: TaskCfg) -> dict[str, list]:
 def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
-    n_envs: int,
-    tm_modules: str,
+    env_nodes: Sequence[str],
     model_save_path: str,
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
@@ -78,8 +77,7 @@ def init_sb3_callbacks(
     Args:
         node: ROS2 supervisor node
         eval_env (VecEnv): The evaluation environment.
-        n_envs (int): Number of environments.
-        tm_modules (str): Task modules the task generator runs.
+        env_nodes (Sequence[str]): Fully qualified env node names.
         model_save_path (str): Path to save the model.
         eval_log_path (str): Path to save evaluation logs.
         callback_cfg (CallbacksCfg): Configuration for callbacks.
@@ -98,7 +96,7 @@ def init_sb3_callbacks(
     callbacks = []
 
     # Add curriculum callback if staging is enabled
-    if "staged" in tm_modules and task_cfg and task_cfg.staged and task_cfg.staged.curriculum_definition and task_cfg.staged.stage_ticks is None:
+    if task_cfg and task_cfg.runs_module("staged") and task_cfg.staged and task_cfg.staged.curriculum_definition and task_cfg.staged.stage_ticks is None:
         curriculum_stages = curriculum_stage_lists(task_cfg)
         if curriculum_stages:
             curriculum_cb = StagedTrainCallback(
@@ -107,16 +105,11 @@ def init_sb3_callbacks(
                 threshold_type=task_cfg.staged.threshold_type,
                 upper_threshold=task_cfg.staged.upper_threshold,
                 lower_threshold=task_cfg.staged.lower_threshold,
-                num_envs=n_envs,
-                parameter_node_template=task_cfg.staged.parameter_node_template,
+                env_nodes=env_nodes,
                 timeout=task_cfg.staged.timeout,
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,
-                tm_dict={
-                    "tm_robots": task_cfg.tm_robots,
-                    "tm_obstacles": task_cfg.tm_obstacles,
-                    "tm_modules": task_cfg.tm_modules,
-                },
+                modes=task_cfg.env_mode_names(),
             )
             callbacks.append(curriculum_cb)
 

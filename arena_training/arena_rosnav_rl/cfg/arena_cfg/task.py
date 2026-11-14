@@ -72,10 +72,6 @@ class StagedCfg(BaseModel):
     )
 
     # ROS2 parameter communication settings
-    parameter_node_template: str = Field(
-        default="/task_generator_node/env{i}",
-        description="Template for task generator node name",
-    )
     timeout: float = Field(default=5.0, description="Timeout for ROS2 parameter service calls (seconds)")
 
     @field_validator("threshold_type")
@@ -127,18 +123,45 @@ class StagedCfg(BaseModel):
     @model_validator(mode="after")
     def validate_curriculum_definition(self) -> Self:
         """Validate curriculum_definition has at least one stage if curriculum is used."""
-        # Only validate if this is being used for curriculum learning
-        # (We can't easily check tm_modules here, so we'll be lenient)
         return self
 
 
+DEFAULT_MODES = {"robots": "random", "obstacles": "random", "modules": "staged"}
+TRAINING_MODULES = ("staged",)
+
+
 class TaskCfg(BaseModel):
-    tm_robots: str = "random"
-    tm_obstacles: str = "random"
-    tm_modules: str = "staged"
+    modes: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_MODES))
 
     # The configuration now only supports the nested `staged` block
     staged: StagedCfg | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_modes(cls, data: object) -> object:
+        """Maps the legacy tm_robots, tm_obstacles and tm_modules keys onto modes."""
+        from arena_runtime.env.task_layer import TM_AXES
+
+        if not isinstance(data, dict) or not any(f"tm_{axis}" in data for axis in TM_AXES):
+            return data
+        data = dict(data)
+        modes = {**DEFAULT_MODES, **data.pop("modes", {})}
+        for axis in TM_AXES:
+            if f"tm_{axis}" in data:
+                logging.getLogger(__name__).warning("task key 'tm_%s' is deprecated, use 'modes.%s'", axis, axis)
+                modes[axis] = data.pop(f"tm_{axis}")
+        data["modes"] = modes
+        return data
+
+    def mode_names(self) -> dict[str, list[str]]:
+        return {axis: [name for name in names.split(",") if name] for axis, names in self.modes.items()}
+
+    def env_mode_names(self) -> dict[str, list[str]]:
+        """The mode names the env runs, without the modules the trainer runs itself."""
+        return {axis: [name for name in names if axis != "modules" or name not in TRAINING_MODULES] for axis, names in self.mode_names().items()}
+
+    def runs_module(self, name: str) -> bool:
+        return name in self.mode_names().get("modules", [])
 
     def get_curriculum_stages(self) -> list[CurriculumStage] | None:
         """Get curriculum stages from configuration.

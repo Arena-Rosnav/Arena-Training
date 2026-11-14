@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 from arena_robots.assembly import RequestPart
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
+
+
+def test_parts_survive_a_json_dump_and_reload():
+    robot = RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount"}], "lidar": [{"variant": "sick_s300"}]})
+    dumped = json.loads(json.dumps(robot.model_dump(mode="json")))
+    assert RobotCfg(**dumped).parts == robot.parts
 
 
 def test_a_robot_without_parts_requests_the_bare_model():

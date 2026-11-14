@@ -18,7 +18,7 @@ right value based on ``threshold_type`` and delegates to
 """
 
 import logging
-from typing import Any
+from collections.abc import Mapping, Sequence
 
 from rclpy.node import Node
 from rosnav_rl.utils.curriculum.curriculum_base import CurriculumBase
@@ -59,19 +59,19 @@ class DreamerV3Curriculum(CurriculumBase):
         self,
         node: Node,
         staged_cfg: StagedCfg,
-        num_envs: int,
+        env_nodes: Sequence[str],
         verbose: int = 0,
         *,
-        tm_dict: dict[str, Any] | None = None,
+        modes: Mapping[str, str | Sequence[str]] | None = None,
     ):
         """Construct from a ``StagedCfg`` config object.
 
         Args:
             node:       ROS2 node used for parameter service calls.
             staged_cfg: ``StagedCfg`` instance from ``arena_cfg.task.staged``.
-            num_envs:   Number of parallel environments (for parameter broadcast).
+            env_nodes:  Fully qualified env node names (for parameter broadcast).
             verbose:    Verbosity level (0=WARNING, 1=INFO, 2=DEBUG).
-            tm_dict:    Optional ``{tm_robots, tm_obstacles, tm_modules}``.
+            modes:      Optional axis -> mode names queued before the first stage.
         """
         # Must be set before CurriculumBase.__init__ because the base
         # constructor calls _apply_curriculum() which may trigger
@@ -84,12 +84,11 @@ class DreamerV3Curriculum(CurriculumBase):
             threshold_type=staged_cfg.threshold_type,
             upper_threshold=staged_cfg.upper_threshold,
             lower_threshold=staged_cfg.lower_threshold,
-            num_envs=num_envs,
-            parameter_node_template=staged_cfg.parameter_node_template,
+            env_nodes=env_nodes,
             timeout=staged_cfg.timeout,
             starting_stage=staged_cfg.starting_stage,
             verbose=verbose,
-            tm_dict=tm_dict,
+            modes=modes,
         )
 
     # ── CurriculumBase abstract interface ──────────────────────────────────

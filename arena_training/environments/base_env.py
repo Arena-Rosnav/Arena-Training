@@ -14,15 +14,19 @@ import rclpy.callback_groups
 import rclpy.parameter
 import rclpy.qos
 import rclpy.time
-import yaml
+from arena_rclpy_mixins.params import Param, Range, declare
 from arena_rclpy_mixins.Time import Time
+from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
+from arena_runtime_msgs.srv import ResetEpisode
+from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
+from rclpy.action import ActionClient
 from rclpy.client import Client
 from rclpy.publisher import Publisher
 from rclpy.task import Future
-from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -36,16 +40,19 @@ from rosnav_rl.reward.reward_units.reward_units import RewardCollision
 from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.utils.logging import flush_errors_decorator
 from rosnav_rl.utils.rostopic import Namespace
-from rosnav_rl.utils.type_aliases import EncodedObservationDict, ObservationDict
-from task_generator_msgs.msg import EpisodeRecord, RobotFleet
-from task_generator_msgs.srv import ResetEpisode
+from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
+from rosnav_rl.utils.yaml_io import load_yaml
 from trajectory_msgs.msg import JointTrajectory
 
+from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
+    get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
+    set_laser_topic,
+    stow_duration,
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
@@ -122,7 +129,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     Attributes:
         node (SupervisorNode): The ROS2 node used for communication.
-        env_ns (Namespace): The env's task_generator_node namespace (lifecycle/state).
+        env_ns (Namespace): The env's arena_env_node namespace (lifecycle/state).
         robot_ns (Namespace): The robot's namespace (cmd_vel, sensor topics). Set by `_resolve_robot`.
         action_space (gymnasium.spaces.Space): The action space, defined by the space manager.
         observation_space (gymnasium.spaces.Space): The observation space, defined by the space manager.
@@ -133,12 +140,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     metadata = {"render_modes": ["human"]}
 
-    _TIMEOUT_PARAM_DEFAULTS = {
-        "reset_task_timeout": 30.0,
-        "service_wait_timeout": 30.0,
-        "episode_wait_timeout": 60.0,
-        "fleet_wait_timeout": 60.0,
-    }
+    _TIMEOUT_PARAMS = (
+        Param[float]("reset_task_timeout", 30.0, "Seconds to wait for the reset task service (negative = no limit)."),
+        Param[float]("service_wait_timeout", 30.0, "Seconds to wait for a runtime service to appear (negative = no limit)."),
+        Param[float]("episode_wait_timeout", 60.0, "Seconds to wait for the next episode to start (negative = no limit)."),
+        Param[float]("fleet_wait_timeout", 60.0, "Seconds to wait for the robot fleet to be published (negative = no limit)."),
+    )
 
     def __init__(
         self,
@@ -155,6 +162,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         observations_config: str | None = None,
         lockstep: bool = False,
         lockstep_step_seconds: float = 0.0999,
+        robot_cfg: RobotCfg | None = None,
         *args: object,
         **kwargs: object,
     ):
@@ -183,6 +191,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             lockstep (bool): Default of the `lockstep` node parameter. Defaults to False.
             lockstep_step_seconds (float): Default of the `lockstep_step_seconds` node parameter.
                 Defaults to 0.0999.
+            robot_cfg (Optional[RobotCfg]): The robot with its parts. If None, the fleet's robot model with default parts.
         """
         super().__init__()
         self._node = node
@@ -204,6 +213,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
         self.__observations_config_path = observations_config
+        self._robot_cfg = robot_cfg
 
         self._steps_curr_episode = 0
         self._episode_reward_terms: dict[str, float] = {}
@@ -216,6 +226,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_srv = None
         self._cmd_vel_pub = None
         self._joint_trajectory_pubs: dict[str, Publisher] = {}
+        self._gripper_action_clients: dict[str, ActionClient] = {}
         self._episode_state_sub = None
         self._latest_episode: EpisodeRecord | None = None
         self._episode_event = threading.Event()
@@ -302,6 +313,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         robot = self._latest_fleet.robots[0].descriptor  # pyright: ignore[reportIndexIssue]
         self._robot_name = robot.name
+        if self._robot_cfg is None:
+            self._robot_cfg = RobotCfg(robot_model=robot.model)
         self.robot_ns = Namespace(robot.ns)
         base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
         self.robot_source_frame = posixpath.join(robot.frame, base_frame)
@@ -354,6 +367,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._joint_trajectory_pubs[arm.controller] = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
             self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
 
+        for gripper in self._gripper_specs():
+            gripper_cmd_topic = self.robot_ns(f"{gripper.controller}/gripper_cmd").to_string()
+            self._gripper_action_clients[gripper.controller] = ActionClient(self.node, GripperCommand, gripper_cmd_topic)
+            self.node.get_logger().info(f"Created GripperCommand action client at: {gripper_cmd_topic}")
+
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
         episode_topic = (self.env_ns / "state" / "episode").to_string()
         self._episode_state_sub = self.node.create_subscription(
@@ -368,27 +386,16 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         )
 
     def _declare_timeout_params(self) -> None:
-        for name, default in self._TIMEOUT_PARAM_DEFAULTS.items():
-            if not self.node.has_parameter(name):
-                self.node.declare_parameter(name, default)
+        self._timeouts = {param.name: declare(self.node, param) for param in self._TIMEOUT_PARAMS}
 
     def _declare_lockstep_params(self) -> None:
-        for name, default in (
-            ("lockstep", self._lockstep),
-            ("lockstep_step_seconds", self._lockstep_step_seconds),
-        ):
-            if not self.node.has_parameter(name):
-                self.node.declare_parameter(name, default)
-        self._lockstep = bool(self.node.get_parameter("lockstep").value)
-        step_seconds = self.node.get_parameter("lockstep_step_seconds").value
-        assert isinstance(step_seconds, (int, float))
-        self._lockstep_step_seconds = float(step_seconds)
+        self._lockstep = declare(self.node, Param[bool]("lockstep", self._lockstep, "Hold the sim between gym steps and advance it by lockstep_step_seconds per step.")).value
+        self._lockstep_step_seconds = declare(self.node, Param[float]("lockstep_step_seconds", self._lockstep_step_seconds, "Sim seconds one gym step advances in lockstep.", constraint=Range(lo=0.0, lo_open=True))).value
 
     def _timeout_param(self, name: str) -> float | None:
         """Read a timeout ROS param. Negative sentinel means infinite (None)."""
-        val = self.node.get_parameter(name).value
-        assert isinstance(val, (int, float))
-        return None if val < 0 else float(val)
+        val = self._timeouts[name].value
+        return None if val < 0 else val
 
     def _setup_observation_manager(self):
         """Configures and initializes the ObservationManager."""
@@ -399,8 +406,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if obs_config_path is None:
             obs_config_path = str(importlib.resources.files("rosnav_rl") / "observations" / "observations.yaml")
 
-        with open(obs_config_path) as file:
-            config = yaml.safe_load(file)
+        config = load_yaml(obs_config_path)
 
         assert self.robot_source_frame is not None
         assert self.robot_ns is not None
@@ -409,6 +415,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if arms:
             set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
         set_pedestrians_topic(config, self.robot_ns.to_string())
+        assert self._robot_cfg is not None
+        set_laser_topic(config, self._robot_cfg.laser_topic)
 
         # Create the observation manager from the configuration
         self.observation_collector = create_observation_manager_from_config(
@@ -452,11 +460,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         assert isinstance(self._model_space_manager, BaseSpaceManager)
         assert isinstance(self._reward_function, RewardFunction)
 
-    def _decode_action(self, action: np.ndarray) -> np.ndarray:
-        """Decodes the given action using the model space encoder."""
-        return self._model_space_manager.decode_action(action)
-
-    def _decode_split_action(self, action: np.ndarray) -> list[tuple[BaseActionSpace, np.ndarray]]:
+    def _decode_split_action(self, action: np.ndarray) -> list[DecodedAction]:
         """Decode action into its sub-spaces and their commands."""
         return self._model_space_manager.decode_split_action(action)
 
@@ -465,6 +469,21 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         spec = self._model_space_manager.action_space_manager.spec
         specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
         return [s for s in specs if isinstance(s, ManipulatorActionSpace)]
+
+    def _stow_seconds(self, arm: ManipulatorActionSpace) -> float:
+        """Seconds a stow trajectory of *arm* takes within its joint velocity limits."""
+        assert self._robot_cfg is not None
+        assert self._robot_cfg.effective_caps is not None
+        assert arm.stow_positions is not None
+        caps = (self._robot_cfg.effective_caps.arm or {}).values()
+        joint_limits = next((caps_arm.joint_limits for caps_arm in caps if caps_arm.controller == arm.controller), {})
+        return stow_duration(arm.joint_names, arm.stow_positions, arm.position_limits, joint_limits)
+
+    def _gripper_specs(self) -> list[GripperActionSpace]:
+        """The gripper sub-spaces of the action space."""
+        spec = self._model_space_manager.action_space_manager.spec
+        specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
+        return [s for s in specs if isinstance(s, GripperActionSpace)]
 
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
@@ -521,6 +540,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
+            elif isinstance(spec, GripperActionSpace):
+                client = self._gripper_action_clients[spec.controller]
+                if client.server_is_ready():
+                    client.send_goal_async(get_gripper_command(float(decoded[0]), spec.max_effort))
+                else:
+                    self.node.get_logger().warning(f"[{self.env_ns.to_string()}] {spec.controller}/gripper_cmd is not ready, gripper command dropped", throttle_duration_sec=5.0)
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 assert self._cmd_vel_pub is not None
@@ -621,7 +646,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         for arm in self._arm_specs():
             if arm.stow_positions is not None and arm.controller in self._joint_trajectory_pubs:
-                self._joint_trajectory_pubs[arm.controller].publish(get_joint_trajectory_from_action(np.asarray(arm.stow_positions), arm.joint_names))
+                trajectory = get_joint_trajectory_from_action(np.asarray(arm.stow_positions), arm.joint_names, self._stow_seconds(arm))
+                self._joint_trajectory_pubs[arm.controller].publish(trajectory)
 
         self._last_step_time = None
 
@@ -662,6 +688,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._after_task_reset()
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
 
+            self._open_grippers()
             self._reward_function.reset()
             self._model_space_manager.reset_spaces()
 
@@ -678,6 +705,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         info = {}
         return self._encode_observation(obs_dict), info
 
+    def _open_grippers(self) -> None:
+        """Waits for every gripper action server and sends it the open position."""
+        for gripper in self._gripper_specs():
+            client = self._gripper_action_clients[gripper.controller]
+            if not client.wait_for_server(timeout_sec=10.0):
+                raise RuntimeError(f"Gripper action server '{gripper.controller}/gripper_cmd' not available after 10s")
+            client.send_goal_async(get_gripper_command(gripper.positions["open"], gripper.max_effort))
+
     def close(self):
         """Cleans up ROS2 resources."""
         self.node.get_logger().info("Closing environment and shutting down ROS components.")
@@ -687,6 +722,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._release_lockstep_hold()
         if self._cmd_vel_pub is not None:
             self.node.destroy_publisher(self._cmd_vel_pub)
+        for client in self._gripper_action_clients.values():
+            client.destroy()
         if self._reset_task_srv is not None:
             self._reset_task_srv.destroy()
         if self._pause_srv is not None:
