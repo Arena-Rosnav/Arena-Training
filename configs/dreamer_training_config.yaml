@@ -213,7 +213,7 @@ agent_config:
         _on_safe_dist_violation: true  # Apply this component on safety violations
       
       factored_reverse_drive:
-        factor: 0.05  # Penalty factor for driving in reverse
+        factor: -0.05  # Penalty factor for driving in reverse
         threshold: 0.0  # Threshold for what constitutes reverse motion
         _on_safe_dist_violation: true  # Apply when safety distance violated
       
