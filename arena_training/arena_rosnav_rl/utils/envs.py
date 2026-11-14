@@ -80,3 +80,32 @@ def get_gripper_command(position: float, max_effort: float) -> GripperCommand.Go
     goal.command.position = position
     goal.command.max_effort = max_effort
     return goal
+
+
+def set_laser_topic(config: dict, topic: str | None) -> None:
+    """Point every LaserScan collector of *config* that names no topic at the robot's laser topic."""
+    for source in config.get("datasources", {}).values():
+        if source.get("type") != "sensor_msgs/LaserScan":
+            continue
+        params = source.setdefault("params", {})
+        if "topic" in params:
+            continue
+        if topic is None:
+            raise ValueError("observations config leaves a LaserScan topic to the robot, but the robot declares no laserscan sensor")
+        params["topic"] = topic
+
+
+def stow_duration(
+    joint_names: list[str],
+    stow_positions: list[float],
+    position_limits: list[tuple[float, float]],
+    joint_limits: dict[str, dict],
+    minimum: float = 0.1,
+) -> float:
+    """Seconds the slowest joint needs to reach its stow position from the far end of its range."""
+    duration = minimum
+    for name, stow, (low, high) in zip(joint_names, stow_positions, position_limits, strict=True):
+        limits = joint_limits.get(name, next((v for k, v in joint_limits.items() if name.endswith(k)), {}))
+        if limits.get("has_velocity_limits", False) and limits["max_velocity"] > 0:
+            duration = max(duration, max(abs(stow - low), abs(stow - high)) / limits["max_velocity"])
+    return duration

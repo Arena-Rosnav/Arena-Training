@@ -39,6 +39,15 @@ def action_ranges(robot: MobileSpec) -> tuple[tuple[float, float], tuple[float, 
     return (limits.linear.min, limits.linear.max), (lateral.min, lateral.max), (limits.angular.min, limits.angular.max)
 
 
+def command_ranges(space: DifferentialDriveActionSpace | OmnidirectionalActionSpace) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """(linear, lateral, angular) bounds of a mobile action space, lateral equal to linear on a differential drive."""
+    from rosnav_rl.cfg.action_spaces import OmnidirectionalActionSpace
+
+    if isinstance(space, OmnidirectionalActionSpace):
+        return space.linear_range_x, space.linear_range_y, space.angular_range
+    return space.linear_range, space.linear_range, space.angular_range
+
+
 def mobile_action_space(robot: MobileSpec, configured: ActionSpaceSpec | None) -> DifferentialDriveActionSpace | OmnidirectionalActionSpace:
     """The agent_config action_space when the YAML sets a mobile one, else the robot's rated velocity_limits."""
     from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, OmnidirectionalActionSpace
@@ -266,6 +275,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         directly from the robot description and arena config.
         """
         from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
+        from rosnav_rl.spaces.observation_space.observation_space_factory import SpaceFactory
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -273,13 +283,13 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         assert caps is not None
         assert robot_desc is not None
         general = self.config.arena_cfg.general
-        linear, _lateral, angular = action_ranges(robot_desc)
         action_space = mobile_action_space(robot_desc, self.config.agent_config.action_space)
+        linear, lateral, angular = command_ranges(action_space)
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
         discretization_cfg = self.config.agent_config.discretization
-        if discretization_cfg is not None:
+        if discretization_cfg is not None and action_space.discrete_actions is None:
             action_space = action_space.model_copy(update={"discretization": discretization_cfg})
             action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete if robot_desc.actions is not None else None)
 
@@ -298,7 +308,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,
         # normalizer, and any other overrides), then stamp in the
-        # hardware-derived values which must always come from the robot desc.
+        # values that must always come from the robot desc and the action space.
         parameters = self.config.agent_config.parameters.model_copy(
             update=dict(
                 laser_num_beams=laser.num_beams,
@@ -309,8 +319,8 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
                 max_linear_vel=linear[1],
                 min_angular_vel=angular[0],
                 max_angular_vel=angular[1],
-                min_translational_vel=linear[0],
-                max_translational_vel=linear[1],
+                min_translational_vel=lateral[0],
+                max_translational_vel=lateral[1],
                 robot_radius=robot_desc.radius,
                 safety_distance=general.safety_distance,
                 goal_radius=general.goal_radius,
@@ -318,13 +328,10 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
             )
         )
 
-        self.config.agent_config = self.config.agent_config.model_copy(
-            update={
-                "robot": robot_cfg.robot_model,
-                "action_space": action_space,
-                "parameters": parameters,
-            }
-        )
+        update: dict[str, object] = {"robot": robot_cfg.robot_model, "action_space": action_space, "parameters": parameters}
+        if not self.config.resume:
+            update["observation_encodings"] = SpaceFactory.current_encodings()
+        self.config.agent_config = self.config.agent_config.model_copy(update=update)
 
     @abstractmethod
     def _setup_agent(self, *args: object, **kwargs: object) -> None:
@@ -348,6 +355,11 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
     @property
     def is_resume(self) -> bool:
         return self.__resume
+
+    @property
+    def env_nodes(self) -> list[str]:
+        """Fully qualified env node names of the spawned envs."""
+        return [f"/{self.namespace_fn(i).lstrip('/')}" for i in range(self.config.arena_cfg.general.n_envs)]
 
     @property
     def node(self) -> SupervisorNode:

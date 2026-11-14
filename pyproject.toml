@@ -9,8 +9,6 @@ authors = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
 maintainers = [{ name = "Tuan Anh Roman Le", email = "anh.maxiking@hotmail.de" }]
 requires-python = "==3.12.*"
 dependencies = [
-    # Core Python dependencies
-    "pyyaml>=6.0,<7.0",
     # Deep Learning & RL
     "torch>=2.0.0,<3.0.0",
     "stable-baselines3>=2.1.0,<3.0.0",

@@ -59,7 +59,7 @@ class DreamerV3Curriculum(CurriculumBase):
         self,
         node: Node,
         staged_cfg: StagedCfg,
-        num_envs: int,
+        env_nodes: Sequence[str],
         verbose: int = 0,
         *,
         modes: Mapping[str, str | Sequence[str]] | None = None,
@@ -69,7 +69,7 @@ class DreamerV3Curriculum(CurriculumBase):
         Args:
             node:       ROS2 node used for parameter service calls.
             staged_cfg: ``StagedCfg`` instance from ``arena_cfg.task.staged``.
-            num_envs:   Number of parallel environments (for parameter broadcast).
+            env_nodes:  Fully qualified env node names (for parameter broadcast).
             verbose:    Verbosity level (0=WARNING, 1=INFO, 2=DEBUG).
             modes:      Optional axis -> mode names queued before the first stage.
         """
@@ -84,8 +84,7 @@ class DreamerV3Curriculum(CurriculumBase):
             threshold_type=staged_cfg.threshold_type,
             upper_threshold=staged_cfg.upper_threshold,
             lower_threshold=staged_cfg.lower_threshold,
-            num_envs=num_envs,
-            parameter_node_template=staged_cfg.parameter_node_template,
+            env_nodes=env_nodes,
             timeout=staged_cfg.timeout,
             starting_stage=staged_cfg.starting_stage,
             verbose=verbose,

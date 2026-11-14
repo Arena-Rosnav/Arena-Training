@@ -14,8 +14,8 @@ agent_config:
   #   strategy: navigational  # see GUIDE.md for all strategies
 
   # Observation pipeline tunables - robot-hardware fields are overwritten
-  # automatically from the robot description at training time; only these
-  # two normalization settings are kept from the YAML.
+  # automatically from the robot description and the action space at
+  # training time; only these two normalization settings are kept from the YAML.
   # parameters:
   #   normalize: true      # normalise all observation values to [-1, 1] / [0, 1]
   #   normalizer: max_abs  # max_abs | min_max | standard | identity
@@ -213,7 +213,7 @@ agent_config:
         _on_safe_dist_violation: true  # Apply this component on safety violations
       
       factored_reverse_drive:
-        factor: 0.05  # Penalty factor for driving in reverse
+        factor: -0.05  # Penalty factor for driving in reverse
         threshold: 0.0  # Threshold for what constitutes reverse motion
         _on_safe_dist_violation: true  # Apply when safety distance violated
       
@@ -293,7 +293,6 @@ arena_cfg:
       upper_threshold: 0.95  # Performance threshold to advance to next stage
       lower_threshold: 0.3  # Performance threshold to stay at current stage
 
-      parameter_node_template: "/arena/env_{i}/arena_env_node"  # Template for task generator node name
       timeout: 5.0  # Timeout for ROS2 parameter service calls (seconds)
       curriculum_definition:
         # Stage 1: No obstacles (safe start)
