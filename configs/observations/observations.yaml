@@ -33,7 +33,7 @@ aliases:
   # nav_path: navigation_path          # Planned trajectory
   
   # Social navigation - pedestrian data
-  people_data: people_detections          # Raw pedestrian detections (people_msgs)
+  # people_data: people_detections          # Raw pedestrian detections (people_msgs)
   arena_people_data: arena_pedestrian_detections  # Arena pedestrian detections (arena_people_msgs)
   pedestrian_relative_locations: arena_pedestrian_relative_locations
   pedestrian_relative_velocities: arena_pedestrian_relative_velocities
@@ -50,13 +50,13 @@ datasources:
   
   # Robot localization sources
   # robot_pose_from_odom:
-  #   type: nav_msgs/Odometry            # → Pose2D
+  #   type: nav_msgs/Odometry             # → Pose2D
   #   params:
   #     topic: "odom"                    # Standard odometry topic
   #     up_to_date_required: true        # Require fresh data for temporal synchronization
 
   robot_pose_from_tf:
-    type: RobotPoseTFGenerator         # Listens to TF tree → Pose2D 
+    type: RobotPoseTFGenerator         # Generator (no ROS topic) → Pose2D
     params: {}                         # Uses simulation_state_container for frame config
 
   # Sensor data collectors
@@ -67,7 +67,7 @@ datasources:
 
   # Navigation target collectors  
   goal_pose:
-    type: geometry_msgs/PoseStamped    # → Pose2D
+    type: geometry_msgs/PoseStamped   # → Pose2D
     params:
       topic: "goal_pose"                # Navigation goal from planner (relative to namespace)
       up_to_date_required: false       # Goal updates less frequently
@@ -77,7 +77,7 @@ datasources:
 
   # Robot control and action data
   last_action:
-    type: geometry_msgs/Twist          # → RobotVelocity
+    type: geometry_msgs/Twist         # → RobotVelocity
     params:
       topic: "cmd_vel"                 # Robot velocity commands
       # up_to_date_required: true
@@ -90,7 +90,7 @@ datasources:
 
   # Social navigation - people detection
   # people_detections:
-  #   type: people_msgs/People           # → PedestrianDetections
+  #   type: people_msgs/People          # → PedestrianDetections
   #   params:
   #     topic: "/arena_env_node/people"                  # People tracker output
   #     up_to_date_required: false
@@ -106,7 +106,7 @@ datasources:
     type: nav2_msgs/CollisionMonitorState  # → SafetyStatus
     params:
       topic: "collision_monitor_state"
-      state_key: "StopPolygon"            # Specific collision state to monitor
+      state_key: "StopPolygon"              # Specific collision state to monitor
 
   # Visual perception
   # front_camera:
@@ -194,7 +194,7 @@ datasources:
   # pedestrian_world_locations:
   #   type: PedestrianLocationGenerator            # Extracts world coordinates of pedestrians
 
-  # # Pedestrian motion analysis
+  # Pedestrian motion analysis
   # pedestrian_relative_velocities:
   #   type: PedestrianRelativeVelGenerator         # Computes pedestrian velocities in robot frame
 
@@ -202,13 +202,12 @@ datasources:
     type: PedestrianRelativeVelXGenerator        # Forward/backward velocity component
 
   pedestrian_vel_y:
-    type: PedestrianRelativeVelYGenerator        # Left/right velocity component  
+    type: PedestrianRelativeVelYGenerator        # Left/right velocity component
 
-  # # Social navigation metrics
+  # Pedestrian classification and social states
   # pedestrian_distances:
   #   type: PedestrianDistanceGenerator            # Minimum distances to each pedestrian group
 
-  # # Pedestrian classification and social states
   # pedestrian_types:
   #   type: PedestrianTypeGenerator                # Extracts pedestrian group/type classifications
 
@@ -263,7 +262,7 @@ datasources:
 #
 # Additional collectors:
 #   rear_camera:
-#     type: sensor_msgs/Image
+#     type: ImageColorCollector
 #     params:
 #       topic: "camera_rear/image_raw"
 #
@@ -279,11 +278,11 @@ datasources:
 #
 # Additional collectors:
 #   rear_laser:
-#     type: sensor_msgs/LaserScan
+#     type: LaserScanCollector  
 #     params:
 #       topic: "scan_rear"
 #   left_laser:
-#     type: sensor_msgs/LaserScan
+#     type: LaserScanCollector
 #     params:
 #       topic: "scan_left"
 #
