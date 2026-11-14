@@ -275,6 +275,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         directly from the robot description and arena config.
         """
         from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
+        from rosnav_rl.spaces.observation_space.observation_space_factory import SpaceFactory
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -288,7 +289,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
         discretization_cfg = self.config.agent_config.discretization
-        if discretization_cfg is not None:
+        if discretization_cfg is not None and action_space.discrete_actions is None:
             action_space = action_space.model_copy(update={"discretization": discretization_cfg})
             action_space = action_space.resolve_discretization(robot_discrete_actions=robot_desc.actions.discrete if robot_desc.actions is not None else None)
 
@@ -327,13 +328,10 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
             )
         )
 
-        self.config.agent_config = self.config.agent_config.model_copy(
-            update={
-                "robot": robot_cfg.robot_model,
-                "action_space": action_space,
-                "parameters": parameters,
-            }
-        )
+        update: dict[str, object] = {"robot": robot_cfg.robot_model, "action_space": action_space, "parameters": parameters}
+        if not self.config.resume:
+            update["observation_encodings"] = SpaceFactory.current_encodings()
+        self.config.agent_config = self.config.agent_config.model_copy(update=update)
 
     @abstractmethod
     def _setup_agent(self, *args: object, **kwargs: object) -> None:

@@ -1,4 +1,4 @@
-"""A configured agent_config action_space bounds the policy's commands, and an arm space is refused."""
+"""The trainer derives the agent spec from the configured action space and keeps what a resumed agent recorded."""
 
 from __future__ import annotations
 
@@ -6,7 +6,14 @@ import pathlib
 import types
 
 import pytest
-from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, ManipulatorActionSpace, OmnidirectionalActionSpace
+from rosnav_rl.cfg.action_spaces import (
+    DifferentialDriveActionSpace,
+    DiscretizationCfg,
+    DiscretizationStrategy,
+    ManipulatorActionSpace,
+    OmnidirectionalActionSpace,
+)
+from rosnav_rl.spaces import SpaceFactory
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
 from arena_training.arena_rosnav_rl.trainer.arena_trainer import ArenaTrainer, action_ranges, mobile_action_space
@@ -61,3 +68,30 @@ def test_the_translational_bounds_follow_the_lateral_range_of_an_omnidirectional
     bounds = _velocity_bounds(action_space=omni)
     assert (bounds["min_linear_vel"], bounds["max_linear_vel"]) == (-0.4, 0.8)
     assert (bounds["min_translational_vel"], bounds["max_translational_vel"]) == (-0.3, 0.3)
+
+
+def _populated(resume: bool = False, **agent_update: object):
+    config = load_training_config(str(CONFIGS / "sb_training_config.yaml"))
+    config.agent_config = config.agent_config.model_copy(update=agent_update)
+    config.resume = resume
+    ArenaTrainer._populate_agent_spec(types.SimpleNamespace(config=config))
+    return config.agent_config
+
+
+def test_a_fresh_training_records_the_current_observation_encodings():
+    assert _populated().observation_encodings == SpaceFactory.current_encodings()
+
+
+def test_a_resumed_training_keeps_the_encodings_it_started_with():
+    assert _populated(resume=True, observation_encodings={}).observation_encodings == {}
+
+
+def test_an_already_resolved_discrete_action_list_is_kept():
+    saved = [{"name": "forward", "linear": 0.5, "angular": 0.0}, {"name": "stop", "linear": 0.0, "angular": 0.0}]
+    space = DifferentialDriveActionSpace(linear_range=(0.0, 0.5), angular_range=(-1.5, 1.5), discrete_actions=saved)
+    uniform = DiscretizationCfg(strategy=DiscretizationStrategy.UNIFORM, buckets_linear=3, buckets_angular=3)
+
+    populated = _populated(action_space=space, discretization=uniform)
+
+    assert isinstance(populated.action_space, DifferentialDriveActionSpace)
+    assert populated.action_space.discrete_actions == saved
