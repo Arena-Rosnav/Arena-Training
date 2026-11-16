@@ -184,6 +184,10 @@ datasources:
       inside_tolerance: 0.0
       min_normal_alignment: 0.5
   
+  target_pose:
+    type: ObjectPoseTFGenerator
+    params:
+      source_frame: "target_cube"
 
   # ---------------------------------------------------------------------------
   # OPTIONAL COLLECTORS: Additional sensors for advanced configurations

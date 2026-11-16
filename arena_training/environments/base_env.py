@@ -33,6 +33,7 @@ from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
     set_end_effector_frames,
     set_grasp_frames,
+    set_object_pose_frames,
     set_pedestrians_topic,
     set_robot_pose_frames,
 )
@@ -415,10 +416,13 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         assert self.robot_source_frame is not None
         assert self.robot_ns is not None
         set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
+        robot_frame = posixpath.dirname(self.robot_source_frame)
+        env_scope = posixpath.dirname(robot_frame)
         arms = self._arm_specs()
         if arms:
             set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
         set_grasp_frames(config, posixpath.dirname(self.robot_source_frame))
+        set_object_pose_frames(config, env_scope)
         set_pedestrians_topic(config, self.robot_ns.to_string())
 
         # Create the observation manager from the configuration
