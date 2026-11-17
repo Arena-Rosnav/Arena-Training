@@ -23,6 +23,12 @@ def generate_launch_description():
         description='Mobile adapter of the training envs.',
     )
 
+    LaunchArgument(
+        name='lockstep',
+        default_value='false',
+        description='Start the runtime lockstep scheduler, off since the envs step the sim per gym step.',
+    )
+
     arena_launch = IncludeLaunchDescriptionForward(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
