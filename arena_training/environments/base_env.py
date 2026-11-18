@@ -15,7 +15,6 @@ import rclpy.parameter
 import rclpy.qos
 import rclpy.time
 from arena_rclpy_mixins.params import Param, Range, declare
-from arena_rclpy_mixins.Time import Time
 from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
@@ -491,7 +490,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _get_dt(self) -> float:
         """Returns the fixed lockstep duration or dynamically calculates elapsed time."""
-        now = Time.parse(self.node.get_clock().now())
+        now = self.node.sim_time
         if self.lockstep:
             self._last_step_time = now
             return self._lockstep_step_seconds

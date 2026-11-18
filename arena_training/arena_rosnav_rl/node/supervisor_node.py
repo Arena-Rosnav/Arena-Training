@@ -2,11 +2,11 @@ import threading
 
 import rclpy
 import rclpy.parameter
+from arena_rclpy_mixins.Time import TimeNode
 from rclpy.executors import SingleThreadedExecutor
-from rclpy.node import Node
 
 
-class SupervisorNode(Node):
+class SupervisorNode(TimeNode):
     # This node is responsible for supervising the training process in a ROS2 environment.
     # stores training parameters and configurations.
     # subscribes to relevant topics and manages the training lifecycle.
