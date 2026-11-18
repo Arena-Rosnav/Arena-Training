@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import arena_robots.Robot
@@ -64,6 +65,8 @@ class RobotCfg(BaseModel):
                 caps.validate_overrides()
             except ValueError as error:
                 raise ValueError(f"robot '{self.robot_model}': {error}") from error
+            for warning in caps.warnings():
+                logging.getLogger(__name__).warning("robot %r: %s", self.robot_model, warning)
 
             object.__setattr__(self, "effective_caps", caps)
             object.__setattr__(self, "view", resolved_view)
