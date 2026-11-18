@@ -44,7 +44,7 @@ class RobotCfg(BaseModel):
     @property
     def launch_arg(self) -> str:
         """The ``robot:=`` launch argument requesting this model with its parts, frames and cap overrides."""
-        requests = [f"{part.mount}={format_part(f'{category}/{part.variant}', part.caps)}" if part.mount else f"{category}={format_part(part.variant, part.caps)}" for category, parts in self.parts.items() for part in parts]
+        requests = [f"{part.mount}={format_part(f'{category}/{part.variant}', part.caps, part.params)}" if part.mount else f"{category}={format_part(part.variant, part.caps, part.params)}" for category, parts in self.parts.items() for part in parts]
         requests += [f"frames.{mount}={stem}" for mount, stem in self.frames.items()]
         requests += [f"{path}={format_inline_override(value)}" for path, value in self.caps.items()]
         return f"robot:={self.robot_model}[{','.join(requests)}]" if requests else f"robot:={self.robot_model}"
