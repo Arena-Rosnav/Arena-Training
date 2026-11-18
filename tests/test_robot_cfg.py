@@ -116,3 +116,9 @@ def test_part_caps_reach_the_instance_and_the_launch_arg():
 def test_a_robot_level_override_of_a_placed_part_names_the_robot():
     with pytest.raises(ValueError, match="rbkairos"):
         RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount"}]}, caps={"arm.arm_mount.stall_time": 2.0})
+
+
+def test_effective_caps_carry_the_body_facts_of_the_robot():
+    body = RobotCfg(robot_model="jackal").effective_caps.body
+    assert body.base_frame == "base_link"
+    assert body.cmd_vel_topic == "jackal_velocity_controller/cmd_vel"
