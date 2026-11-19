@@ -566,7 +566,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         dt = self._get_dt() if self._joint_trajectory_pubs else 0.0
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
-                target = self._get_target_positions(spec=spec, velocities=decoded, dt=dt)
+                target = self._get_target_positions(spec, decoded, dt)
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(target, spec.joint_names, dt))
             elif isinstance(spec, GripperActionSpace):
                 client = self._gripper_action_clients[spec.controller]
