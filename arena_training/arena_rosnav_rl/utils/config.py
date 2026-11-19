@@ -4,8 +4,9 @@ import json
 import logging
 from pathlib import Path
 
+from rosnav_rl.utils.yaml_io import load_yaml
+
 from .. import cfg
-from .training import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def get_config_path(config_file: str) -> Path:
 
 
 def load_training_config(path: str) -> cfg.TrainingCfg:
-    raw = load_config(path)
+    raw = load_yaml(path)
 
     # Resolve relative observations_config path against the config file's directory
     obs_cfg = raw.get("agent_config", {}).get("observations_config")

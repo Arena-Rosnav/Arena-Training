@@ -25,6 +25,7 @@ import rclpy
 from arena_training.arena_rosnav_rl.cfg import RobotCfg
 from arena_training.arena_rosnav_rl.utils.argsparser import parse_training_args
 from arena_training.arena_rosnav_rl.utils.config import get_config_path, load_training_config
+from arena_training.arena_rosnav_rl.utils.launch_args import env_launch_args
 from arena_training.arena_rosnav_rl.utils.sim_bootstrap import spawn_envs, wait_for_simulation
 from arena_training.arena_rosnav_rl.trainer import get_trainer
 
@@ -113,11 +114,7 @@ def main():
 
         assert config.arena_cfg.general is not None
         n_envs: int = config.arena_cfg.general.n_envs
-        env_seed = config.arena_cfg.general.env_seed
-        extra_args = config.arena_cfg.general.env_launch_args
-        robot_launch_arg = config.arena_cfg.robot.launch_arg
-        clearance = f"task.episode.spawn.robot_clearance:={config.arena_cfg.general.safety_distance}"
-        per_env_launch_args = [["robot.train:=true", "task.episode.auto_reset:=false", robot_launch_arg, clearance, *([f"run_seed:={env_seed}-{i}"] if env_seed is not None else []), *(extra_args[i % len(extra_args)] if extra_args else [])] for i in range(n_envs)]
+        per_env_launch_args = env_launch_args(config.arena_cfg.general, config.arena_cfg.robot)
 
         with _stage(f"spawn_envs (n={n_envs})"):
             env_map = spawn_envs(n_envs, per_env_launch_args)

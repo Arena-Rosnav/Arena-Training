@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-import yaml
+from rosnav_rl.utils.yaml_io import loads_yaml, dumps_yaml
 
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 
@@ -34,9 +34,9 @@ def test_every_shipped_training_config_loads(config: pathlib.Path):
     ],
 )
 def test_yaml_lists_load_into_action_space_tuples(tmp_path: pathlib.Path, action_space: dict, parsed: dict):
-    raw = yaml.safe_load((CONFIGS / "sb_training_config.yaml").read_text())
+    raw = loads_yaml((CONFIGS / "sb_training_config.yaml").read_text())
     raw["agent_config"]["action_space"] = action_space
     config = tmp_path / "training_config.yaml"
-    config.write_text(yaml.safe_dump(raw))
+    config.write_text(dumps_yaml(raw))
     space = load_training_config(str(config)).agent_config.action_space
     assert {key: getattr(space, key) for key in parsed} == parsed

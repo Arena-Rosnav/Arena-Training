@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from rosnav_rl.utils.stable_baselines3.callbacks import (
@@ -62,7 +62,7 @@ def curriculum_stage_lists(task_cfg: TaskCfg) -> dict[str, list]:
 def init_sb3_callbacks(
     node: SupervisorNode,
     eval_env: VecEnv,
-    n_envs: int,
+    env_nodes: Sequence[str],
     model_save_path: str,
     eval_log_path: str,
     callback_cfg: "ArenaCallbacksCfg",
@@ -77,7 +77,7 @@ def init_sb3_callbacks(
     Args:
         node: ROS2 supervisor node
         eval_env (VecEnv): The evaluation environment.
-        n_envs (int): Number of environments.
+        env_nodes (Sequence[str]): Fully qualified env node names.
         model_save_path (str): Path to save the model.
         eval_log_path (str): Path to save evaluation logs.
         callback_cfg (CallbacksCfg): Configuration for callbacks.
@@ -105,8 +105,7 @@ def init_sb3_callbacks(
                 threshold_type=task_cfg.staged.threshold_type,
                 upper_threshold=task_cfg.staged.upper_threshold,
                 lower_threshold=task_cfg.staged.lower_threshold,
-                num_envs=n_envs,
-                parameter_node_template=task_cfg.staged.parameter_node_template,
+                env_nodes=env_nodes,
                 timeout=task_cfg.staged.timeout,
                 starting_stage=task_cfg.staged.starting_stage,
                 verbose=1,

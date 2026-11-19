@@ -28,7 +28,7 @@ class GeneralCfg(BaseModel):
     verbose: int | bool = Field(default=False, title="Verbose Mode")
     control_hz: float = Field(default=10.0, gt=0, description="Control frequency in Hz for TimeSyncWrapper")
     lockstep: bool = False
-    # Quantized to physics ticks server-side by sim_lifecycle/step.
+    # Rounded up to physics ticks server-side by lockstep/advance.
     lockstep_step_seconds: float = Field(default=0.0999, gt=0)
     env_seed: int | None = None
     env_launch_args: list[list[str]] = Field(default_factory=list)

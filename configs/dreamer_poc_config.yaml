@@ -310,7 +310,6 @@ arena_cfg:
       threshold_type: succ
       upper_threshold: 0.95     # advance at 95% success (slightly lower → progress faster)
       lower_threshold: 0.3
-      parameter_node_template: "/arena/env_{i}/arena_env_node"
       timeout: 5.0
       curriculum_definition:
         # Stage 0: Empty map — validate the pipeline; robot should reach goal reliably

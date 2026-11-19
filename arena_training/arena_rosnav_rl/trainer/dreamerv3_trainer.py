@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, cast
 
 import rosnav_rl
 import rosnav_rl.model.dreamerv3 as dreamerv3
+from gymnasium import spaces
 from rosnav_rl import SupportedRLFrameworks
 from rosnav_rl.model.dreamerv3.cfg import DreamerV3Cfg
 from rosnav_rl.model.dreamerv3.envs.wrappers import DreamerEnv
+from rosnav_rl.spaces import ActionSpaceManager
 
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
@@ -19,6 +21,8 @@ from ..trainer.arena_trainer import ArenaTrainer
 from ..utils.env_factory import make_envs
 
 if TYPE_CHECKING:
+    from rosnav_rl.cfg.agent import AgentConfig
+
     from ..dreamerv3.dreamerv3_curriculum import DreamerV3Curriculum
 from ..utils.monitoring import setup_wandb
 
@@ -46,6 +50,14 @@ class DreamerV3Environment:
                 env.close()
             except Exception:
                 pass
+
+
+def dreamer_agent_config(agent_config: AgentConfig, resume: bool) -> AgentConfig:
+    """The agent config Dreamer trains with: normalized actions on a fresh training of a continuous space."""
+    assert agent_config.action_space is not None
+    if resume or agent_config.normalized_actions or not isinstance(ActionSpaceManager(agent_config.action_space).action_space, spaces.Box):
+        return agent_config
+    return agent_config.model_copy(update={"normalized_actions": True})
 
 
 class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
@@ -76,6 +88,10 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
                 to_watch=[self._dreamer()],
                 agent_id=self.config.agent_config.name,
             )
+
+    def _populate_agent_spec(self) -> None:
+        super()._populate_agent_spec()
+        self.config.agent_config = dreamer_agent_config(self.config.agent_config, self.config.resume)
 
     def _setup_agent(self, *args: object, **kwargs: object):
         """Set up the DreamerV3 RL agent.
@@ -120,6 +136,7 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
             rl_agent=self.agent,
             n_envs=general_cfg.n_envs,
             max_steps=general_cfg.max_num_moves_per_eps,
+            robot_cfg=self.config.arena_cfg.robot,
             init_env_by_call=False,
             namespace_fn=self.namespace_fn,
             simulation_state_container=self.agent_parameters,
@@ -168,7 +185,7 @@ class DreamerV3Trainer(ArenaTrainer[DreamerV3Environment]):
         self._curriculum = DreamerV3Curriculum(
             node=self.node,
             staged_cfg=staged,
-            num_envs=general_cfg.n_envs,
+            env_nodes=self.env_nodes,
             verbose=int(general_cfg.verbose),
             modes=task_cfg.env_mode_names(),
         )

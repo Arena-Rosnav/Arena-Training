@@ -1,27 +1,32 @@
-"""The policy's command bounds are the agent_config action_space when set, else the robot's rated velocity limits from its mobile caps."""
+"""The trainer derives the agent spec from the configured action space and keeps what a resumed agent recorded."""
 
 from __future__ import annotations
 
+import pathlib
+import types
+
 import pytest
-from rosnav_rl.cfg.action_spaces import DifferentialDriveActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import (
+    DifferentialDriveActionSpace,
+    DiscretizationCfg,
+    DiscretizationStrategy,
+    ManipulatorActionSpace,
+    OmnidirectionalActionSpace,
+)
+from rosnav_rl.spaces import SpaceFactory
 
 from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
-from arena_training.arena_rosnav_rl.trainer.arena_trainer import action_ranges, mobile_action_space
+from arena_training.arena_rosnav_rl.trainer.arena_trainer import ArenaTrainer, action_ranges, mobile_action_space
+from arena_training.arena_rosnav_rl.utils.config import load_training_config
+
+CONFIGS = pathlib.Path(__file__).parents[1] / "configs"
 
 
-def test_jackal_commands_are_bounded_by_its_rated_limits():
-    jackal = RobotCfg(robot_model="jackal").robot_description
-    linear, lateral, angular = action_ranges(jackal)
-    assert linear == pytest.approx((jackal.velocity_limits.linear.min, jackal.velocity_limits.linear.max))
-    assert angular == pytest.approx((jackal.velocity_limits.angular.min, jackal.velocity_limits.angular.max))
-    assert lateral == pytest.approx(linear)
-    assert (linear, angular) == ((-0.5, 0.5), (-1.5, 1.5))
-
-
-def test_without_a_configured_action_space_the_rated_limits_bound_the_commands():
-    space = mobile_action_space(RobotCfg(robot_model="jackal").robot_description, None)
-    assert isinstance(space, DifferentialDriveActionSpace)
-    assert (space.linear_range, space.angular_range) == ((-0.5, 0.5), (-1.5, 1.5))
+def _velocity_bounds(**agent_update: object) -> dict[str, float]:
+    config = load_training_config(str(CONFIGS / "sb_training_config.yaml"))
+    config.agent_config = config.agent_config.model_copy(update=agent_update)
+    ArenaTrainer._populate_agent_spec(types.SimpleNamespace(config=config))
+    return config.agent_config.parameters.model_dump(include={"min_linear_vel", "max_linear_vel", "min_translational_vel", "max_translational_vel", "min_angular_vel", "max_angular_vel"})
 
 
 def test_a_configured_forward_only_action_space_replaces_the_rated_limits():
@@ -35,3 +40,58 @@ def test_a_configured_arm_action_space_is_rejected():
     arm = ManipulatorActionSpace(joint_names=["shoulder"], position_limits=[(-1.0, 1.0)], controller="arm_controller", tip_link="tool")
     with pytest.raises(ValueError, match="differential_drive or omnidirectional"):
         mobile_action_space(RobotCfg(robot_model="jackal").robot_description, arm)
+
+
+def test_the_observation_velocity_bounds_follow_a_configured_action_space():
+    forward = DifferentialDriveActionSpace(linear_range=(0.0, 0.5), angular_range=(-1.5, 1.5))
+    assert _velocity_bounds(action_space=forward) == {
+        "min_linear_vel": 0.0,
+        "max_linear_vel": 0.5,
+        "min_translational_vel": 0.0,
+        "max_translational_vel": 0.5,
+        "min_angular_vel": -1.5,
+        "max_angular_vel": 1.5,
+    }
+
+
+def test_the_observation_velocity_bounds_follow_the_rated_limits_without_a_configured_action_space():
+    config = load_training_config(str(CONFIGS / "sb_training_config.yaml"))
+    assert config.arena_cfg.robot.robot_description is not None
+    linear, _lateral, angular = action_ranges(config.arena_cfg.robot.robot_description)
+    bounds = _velocity_bounds(action_space=None)
+    assert (bounds["min_linear_vel"], bounds["max_linear_vel"]) == linear
+    assert (bounds["min_angular_vel"], bounds["max_angular_vel"]) == angular
+
+
+def test_the_translational_bounds_follow_the_lateral_range_of_an_omnidirectional_action_space():
+    omni = OmnidirectionalActionSpace(linear_range_x=(-0.4, 0.8), linear_range_y=(-0.3, 0.3), angular_range=(-1.0, 1.0))
+    bounds = _velocity_bounds(action_space=omni)
+    assert (bounds["min_linear_vel"], bounds["max_linear_vel"]) == (-0.4, 0.8)
+    assert (bounds["min_translational_vel"], bounds["max_translational_vel"]) == (-0.3, 0.3)
+
+
+def _populated(resume: bool = False, **agent_update: object):
+    config = load_training_config(str(CONFIGS / "sb_training_config.yaml"))
+    config.agent_config = config.agent_config.model_copy(update=agent_update)
+    config.resume = resume
+    ArenaTrainer._populate_agent_spec(types.SimpleNamespace(config=config))
+    return config.agent_config
+
+
+def test_a_fresh_training_records_the_current_observation_encodings():
+    assert _populated().observation_encodings == SpaceFactory.current_encodings()
+
+
+def test_a_resumed_training_keeps_the_encodings_it_started_with():
+    assert _populated(resume=True, observation_encodings={}).observation_encodings == {}
+
+
+def test_an_already_resolved_discrete_action_list_is_kept():
+    saved = [{"name": "forward", "linear": 0.5, "angular": 0.0}, {"name": "stop", "linear": 0.0, "angular": 0.0}]
+    space = DifferentialDriveActionSpace(linear_range=(0.0, 0.5), angular_range=(-1.5, 1.5), discrete_actions=saved)
+    uniform = DiscretizationCfg(strategy=DiscretizationStrategy.UNIFORM, buckets_linear=3, buckets_angular=3)
+
+    populated = _populated(action_space=space, discretization=uniform)
+
+    assert isinstance(populated.action_space, DifferentialDriveActionSpace)
+    assert populated.action_space.discrete_actions == saved

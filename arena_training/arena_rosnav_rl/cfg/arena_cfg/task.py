@@ -72,10 +72,6 @@ class StagedCfg(BaseModel):
     )
 
     # ROS2 parameter communication settings
-    parameter_node_template: str = Field(
-        default="/arena/env_{i}/arena_env_node",
-        description="Template for task generator node name",
-    )
     timeout: float = Field(default=5.0, description="Timeout for ROS2 parameter service calls (seconds)")
 
     @field_validator("threshold_type")
