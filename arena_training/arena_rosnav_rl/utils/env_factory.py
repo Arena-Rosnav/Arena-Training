@@ -191,7 +191,7 @@ def make_envs(
         namespace_fn: Function mapping index → environment namespace string.
         wrappers: Optional gym wrappers to apply to each environment.
         observations_config: Path to a custom observations YAML config file.
-        lockstep: Gym-exact stepping via sim_lifecycle/step.
+        lockstep: Gym-exact stepping through the runtime's driven lockstep run.
         lockstep_step_seconds: Sim seconds advanced per gym step under lockstep.
 
     Returns:

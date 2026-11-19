@@ -1,3 +1,5 @@
+import contextlib
+import itertools
 import json
 import os
 import posixpath
@@ -15,11 +17,9 @@ import rclpy.parameter
 import rclpy.qos
 import rclpy.time
 from arena_rclpy_mixins.params import Param, Range, declare
-from arena_rclpy_mixins.Time import Time
-from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
+from arena_runtime_msgs.msg import EpisodeRecord, LockstepChannel, LockstepRegistration, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
-from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
-from arena_runtime_msgs.srv import ResetEpisode
+from arena_runtime_msgs.srv import LockstepAdvance, LockstepRegister, LockstepStart, ResetEpisode
 from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
 from rclpy.action import ActionClient
@@ -56,20 +56,21 @@ from arena_training.arena_rosnav_rl.utils.envs import (
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
-_STEP_WINDOW_REFUSAL = "no open unpause window"
-_STEP_WINDOW_WAIT = 60.0
 _GRACE_STEPS = 3
+_LOCKSTEP = "/arena/sim_lifecycle/lockstep"
+_GATE_WARMUP_STEPS = 20
+_GATE_MIN_STAMPS = 5
+_GATE_PERIOD_MARGIN = 1.5
 
 
-def call_hold(client: Client, caller_id: str, reason: str, action: int, timeout: float) -> bool:
-    """One blocking sim_lifecycle/hold call, False when no response arrives within `timeout`."""
-    request = LifecycleHoldSrv.Request(caller_id=caller_id, reason=reason, action=action)
+def call_sync[ResponseT](client: Client, request: object, response_type: type[ResponseT], timeout: float | None, name: str) -> ResponseT | None:
+    """One blocking service call, None when no response arrives within `timeout`."""
     completion_event = threading.Event()
-    result_container: dict[str, BaseException | None] = {"exception": None}
+    result_container: dict[str, object] = {"result": None, "exception": None}
 
     def done_callback(future: Future):
         try:
-            future.result()
+            result_container["result"] = future.result()
         except Exception as e:
             result_container["exception"] = e
         finally:
@@ -79,20 +80,32 @@ def call_hold(client: Client, caller_id: str, reason: str, action: int, timeout:
     future.add_done_callback(done_callback)
     if not completion_event.wait(timeout=timeout):
         future.cancel()
-        return False
+        return None
     if result_container["exception"] is not None:
-        raise RuntimeError(f"sim_lifecycle/hold ({reason}) failed: {result_container['exception']}")
-    return True
+        raise RuntimeError(f"{name} failed: {result_container['exception']}")
+    result = result_container["result"]
+    assert isinstance(result, response_type)
+    return result
 
 
-def acquire_hold(client: Client, caller_id: str, reason: str, timeout: float, attempts: int = 3) -> None:
-    """Holds the sim once under (caller_id, reason), releasing before each re-sent acquire."""
-    for attempt in range(attempts):
-        if attempt:
-            call_hold(client, caller_id, reason, LifecycleHoldSrv.Request.RELEASE, timeout)
-        if call_hold(client, caller_id, reason, LifecycleHoldSrv.Request.ACQUIRE, timeout):
-            return
-    raise RuntimeError(f"sim_lifecycle/hold ({reason}) timed out {attempts} times after {timeout}s each")
+def start_driven_lockstep(client: Client, timeout: float, attempts: int = 3) -> None:
+    """Starts the runtime's driven lockstep run, re-sending a start whose response was lost, which a running driven run answers without a restart."""
+    for _ in range(attempts):
+        response = call_sync(client, LockstepStart.Request(target_rtf=0.0, ungated=False, driven=True), LockstepStart.Response, timeout, "lockstep/start")
+        if response is None:
+            continue
+        if not response.success:
+            raise RuntimeError(f"lockstep/start refused: {response.error_msg}")
+        return
+    raise RuntimeError(f"lockstep/start timed out {attempts} times after {timeout}s each")
+
+
+def gate_period(stamps: list[float], floor: float) -> float | None:
+    """Gate period of a stream from its distinct stamps: the median gap with margin, at least `floor`, None for too few stamps."""
+    gaps = sorted(b - a for a, b in itertools.pairwise(stamps) if b > a)
+    if len(gaps) + 1 < _GATE_MIN_STAMPS:
+        return None
+    return max(_GATE_PERIOD_MARGIN * gaps[len(gaps) // 2], floor)
 
 
 def goal_tolerance(record: EpisodeRecord, robot: str) -> float | None:
@@ -246,11 +259,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_pending_token: object = None
         self._pause_lock = threading.Lock()
         self._pause_lazy_threshold: float = 1.5
-        # Lockstep: gym-exact stepping via sim_lifecycle/step, lazy pause stays idle while on.
+        # Lockstep: gym-exact stepping through the runtime's driven lockstep run, lazy pause stays idle while on.
         self._lockstep: bool = lockstep
         self._lockstep_step_seconds: float = lockstep_step_seconds
-        self._step_srv = None
-        self._lockstep_hold_active: bool = False
+        self._advance_srv: Client | None = None
+        self._register_srv: Client | None = None
+        self._gate_steps = 0
+        self._gate_stamps: dict[str, list[float]] = {}
+        self._gates_registered = False
         self._action_applied: bool = False
         self._initialized = False
 
@@ -345,17 +361,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._pause_srv = None
 
         if self._lockstep:
-            if self._pause_srv is None:
-                raise RuntimeError("Lockstep mode requires the sim_lifecycle/hold service; client unavailable.")
-            step_srv_name = "/arena/sim_lifecycle/step"
-            self._step_srv = self.node.create_client(
-                LifecycleStepSrv,
-                step_srv_name,
-                callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup(),
-            )
-            if not self._step_srv.wait_for_service(timeout_sec=10.0):
-                raise RuntimeError(f"Service '{step_srv_name}' not available after 10s; lockstep mode cannot function.")
-            self._acquire_lockstep_hold()
+            start_srv = self.node.create_client(LockstepStart, f"{_LOCKSTEP}/start", callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup())
+            self._advance_srv = self.node.create_client(LockstepAdvance, f"{_LOCKSTEP}/advance", callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup())
+            self._register_srv = self.node.create_client(LockstepRegister, f"{_LOCKSTEP}/register", callback_group=rclpy.callback_groups.MutuallyExclusiveCallbackGroup())
+            for client in (start_srv, self._advance_srv, self._register_srv):
+                if not client.wait_for_service(timeout_sec=10.0):
+                    raise RuntimeError(f"Service '{client.srv_name}' not available after 10s; lockstep mode cannot function.")
+            start_driven_lockstep(start_srv, 10.0)
+            start_srv.destroy()
 
         # Direct cmd_vel publisher, the sole source of velocity commands
         # during training.  Completely bypasses the nav2 controller_server.
@@ -493,7 +506,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     def _get_dt(self) -> float:
         """Returns the fixed lockstep duration or dynamically calculates elapsed time."""
-        now = Time.parse(self.node.get_clock().now())
+        now = self.node.sim_time
         if self.lockstep:
             self._last_step_time = now
             return self._lockstep_step_seconds
@@ -580,10 +593,48 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._cmd_vel_pub.publish(get_twist_from_action(decoded))
 
     def step_sim(self) -> None:
-        """Advances the held sim by one lockstep step."""
-        self._step_sim(self._lockstep_step_seconds)
+        """Advances the driven lockstep run by one step, returning once its gates cover the new sim time."""
+        assert self._advance_srv is not None
+        response = call_sync(self._advance_srv, LockstepAdvance.Request(seconds=self._lockstep_step_seconds), LockstepAdvance.Response, self._timeout_param("service_wait_timeout"), "lockstep/advance")
+        if response is None:
+            raise RuntimeError("lockstep/advance timed out")
+        if not response.success:
+            raise RuntimeError(f"lockstep/advance failed: {response.error_msg}")
+
+    def _learn_gates(self) -> None:
+        """Registers the stamped fresh-data observation streams as lockstep gates once a warmup has measured their periods."""
+        if not self._lockstep or self._gates_registered:
+            return
+        types: dict[str, type] = {}
+        for topic, (msg_type, stamp) in self.observation_collector.fresh_stamps().items():
+            types[topic] = msg_type
+            seen = self._gate_stamps.setdefault(topic, [])
+            if stamp is not None and (not seen or stamp.nanoseconds / 1e9 != seen[-1]):
+                seen.append(stamp.nanoseconds / 1e9)
+        self._gate_steps += 1
+        if self._gate_steps < _GATE_WARMUP_STEPS:
+            return
+        channels = []
+        for topic, stamps in self._gate_stamps.items():
+            period = gate_period(stamps, self._lockstep_step_seconds)
+            if period is None:
+                self.node.get_logger().warning(f"[{self.env_ns.to_string()}] {topic} published {len(stamps)} stamps in {_GATE_WARMUP_STEPS} steps, not gated")
+                continue
+            msg_type = types[topic]
+            channels.append(LockstepChannel(name=f"obs{topic}", topic=topic, type=f"{msg_type.__module__.split('.')[0]}/msg/{msg_type.__name__}", period_s=period, hard=True))
+        self._register_gates(channels)
+        self._gates_registered = True
+        self.node.get_logger().info(f"[{self.env_ns.to_string()}] lockstep gates on {', '.join(f'{ch.topic} ({ch.period_s:.3f}s)' for ch in channels) or 'no observation streams'}")
+
+    def _register_gates(self, channels: list[LockstepChannel]) -> None:
+        assert self._register_srv is not None
+        registration = LockstepRegistration(caller=f"{self.env_ns.to_string().rstrip('/')}/train", env=self.env_ns.to_string(), channels=channels)
+        response = call_sync(self._register_srv, LockstepRegister.Request(registration=registration), LockstepRegister.Response, 10.0, "lockstep/register")
+        if response is None or not response.success:
+            raise RuntimeError(f"lockstep/register failed: {'timeout' if response is None else response.error_msg}")
 
     def _observe(self) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
+        self._learn_gates()
         try:
             obs_dict = self.observation_collector.get_observations(
                 simulation_state_container=self.__agent_parameters,
@@ -750,8 +801,9 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self.node.get_logger().info("Closing environment and shutting down ROS components.")
 
         self.observation_collector.shutdown()
-        if self._lockstep_hold_active:
-            self._release_lockstep_hold()
+        if self._gates_registered:
+            with contextlib.suppress(RuntimeError):
+                self._register_gates([])
         if self._cmd_vel_pub is not None:
             self.node.destroy_publisher(self._cmd_vel_pub)
         for client in self._gripper_action_clients.values():
@@ -760,8 +812,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._reset_task_srv.destroy()
         if self._pause_srv is not None:
             self._pause_srv.destroy()
-        if self._step_srv is not None:
-            self._step_srv.destroy()
+        if self._advance_srv is not None:
+            self._advance_srv.destroy()
+        if self._register_srv is not None:
+            self._register_srv.destroy()
         if self._episode_state_sub is not None:
             self.node.destroy_subscription(self._episode_state_sub)
         if self._owns_node:
@@ -810,65 +864,6 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         req.reason = "training_env_pause"
         req.action = LifecycleHoldSrv.Request.ACQUIRE if paused else LifecycleHoldSrv.Request.RELEASE
         self._pause_srv.call_async(req)
-
-    def _acquire_lockstep_hold(self) -> None:
-        """Acquire the persistent 'training' hold for lockstep mode."""
-        self._call_hold_sync(LifecycleHoldSrv.Request.ACQUIRE, "training")
-        self._lockstep_hold_active = True
-
-    def _release_lockstep_hold(self) -> None:
-        """Release the persistent 'training' hold acquired for lockstep mode."""
-        self._call_hold_sync(LifecycleHoldSrv.Request.RELEASE, "training")
-        self._lockstep_hold_active = False
-
-    def _call_hold_sync(self, action: int, reason: str, timeout: float = 10.0) -> None:
-        """Blocking sim_lifecycle/hold call. Raises RuntimeError on failure or timeout."""
-        caller_id = self.node.get_fully_qualified_name()
-        assert self._pause_srv is not None
-        if action == LifecycleHoldSrv.Request.ACQUIRE:
-            acquire_hold(self._pause_srv, caller_id, reason, timeout)
-        elif not call_hold(self._pause_srv, caller_id, reason, action, timeout):
-            raise RuntimeError(f"sim_lifecycle/hold ({reason}) timed out after {timeout}s")
-
-    def _step_sim(self, seconds: float) -> float:
-        """Blocking sim_lifecycle/step call that waits out another env's unpause window. Raises RuntimeError on failure or timeout."""
-        timeout = self._timeout_param("service_wait_timeout")
-        deadline = time.monotonic() + (_STEP_WINDOW_WAIT if timeout is None else timeout)
-        while True:
-            result = self._call_step_sim(seconds, timeout)
-            if result.success:
-                return result.advanced
-            if _STEP_WINDOW_REFUSAL not in result.error_msg or time.monotonic() > deadline:
-                raise RuntimeError(f"sim_lifecycle/step failed: {result.error_msg}")
-            time.sleep(0.02)
-
-    def _call_step_sim(self, seconds: float, timeout: float | None) -> LifecycleStepSrv.Response:
-        req = LifecycleStepSrv.Request()
-        req.seconds = seconds
-
-        completion_event = threading.Event()
-        result_container: dict[str, LifecycleStepSrv.Response | Exception | None] = {"result": None, "exception": None}
-
-        def done_callback(future: Future):
-            try:
-                result_container["result"] = future.result()
-            except Exception as e:
-                result_container["exception"] = e
-            finally:
-                completion_event.set()
-
-        assert self._step_srv is not None
-        future = self._step_srv.call_async(req)
-        future.add_done_callback(done_callback)
-
-        if not completion_event.wait(timeout=timeout):
-            future.cancel()
-            raise RuntimeError(f"sim_lifecycle/step timed out after {timeout}s")
-        if result_container["exception"] is not None:
-            raise RuntimeError(f"sim_lifecycle/step call failed: {result_container['exception']}")
-        result = result_container["result"]
-        assert isinstance(result, LifecycleStepSrv.Response)
-        return result
 
     def reset_task(self, timeout: float | None = None, retries: int = 2) -> bool:
         """Call task-generator's lifecycle/reset_episode and block until it completes.
