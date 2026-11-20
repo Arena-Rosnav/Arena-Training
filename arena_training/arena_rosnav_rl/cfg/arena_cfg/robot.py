@@ -75,5 +75,5 @@ class RobotCfg(BaseModel):
             assert self.effective_caps is not None
             mobile = self.effective_caps.mobile
             if mobile is None:
-                raise ValueError(f"robot '{self.robot_model}' does not advertise a 'mobile' cap, RobotCfg requires caps/mobile.yaml")
+                raise ValueError(f"robot '{self.robot_model}' does not advertise a 'mobile' cap, RobotCfg requires a mobile section in caps.yaml")
             object.__setattr__(self, "robot_description", mobile)
