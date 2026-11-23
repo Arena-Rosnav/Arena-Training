@@ -13,6 +13,7 @@ from arena_training.arena_rosnav_rl.cfg.arena_cfg.robot import RobotCfg
 from arena_training.arena_rosnav_rl.trainer.arena_trainer import action_ranges, command_ranges, mobile_action_space
 
 
+@pytest.mark.requires_installed("rbkairos", "arm/ur", "lidar/sick_s300")
 def test_parts_survive_a_json_dump_and_reload():
     robot = RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount"}], "lidar": [{"variant": "sick_s300"}]})
     dumped = json.loads(json.dumps(robot.model_dump(mode="json")))
@@ -23,11 +24,13 @@ def test_a_robot_without_parts_requests_the_bare_model():
     assert RobotCfg(robot_model="jackal").launch_arg == "robot:=jackal"
 
 
+@pytest.mark.requires_installed("rbkairos", "arm/ur", "lidar/sick_s300")
 def test_mounted_and_type_only_parts_are_both_requested():
     robot = RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount"}], "lidar": [{"variant": "sick_s300"}]})
     assert robot.launch_arg == "robot:=rbkairos[arm_mount=arm/ur5e,lidar=sick_s300]"
 
 
+@pytest.mark.requires_installed("rbkairos", "arm/ur")
 def test_yaml_parts_resolve_into_the_arm_caps():
     robot = RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount"}]})
     assert robot.parts == {"arm": [RequestPart(variant="ur5e", mount="arm_mount")]}
@@ -89,6 +92,7 @@ def test_a_robot_with_cap_overrides_requests_them_inline():
     assert robot.launch_arg == "robot:=jackal[mobile.velocity_limits.linear=[-0.5,1.0],mobile.radius=*1.2]"
 
 
+@pytest.mark.requires_installed("rbkairos", "arm/ur", "lidar/sick_s300")
 def test_the_launch_arg_of_parts_frames_and_caps_parses_back_to_the_same_request():
     robot = RobotCfg(
         robot_model="rbkairos",
@@ -104,6 +108,7 @@ def test_the_launch_arg_of_parts_frames_and_caps_parses_back_to_the_same_request
     assert config.caps == robot.caps
 
 
+@pytest.mark.requires_installed("rbkairos", "arm/ur")
 def test_part_caps_reach_the_instance_and_the_launch_arg():
     robot = RobotCfg(robot_model="rbkairos", parts={"arm": [{"variant": "ur5e", "mount": "arm_mount", "caps": {"stall_time": 2.0}}]})
     assert robot.effective_caps.arm is not None
