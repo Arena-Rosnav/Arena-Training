@@ -16,11 +16,9 @@ class RobotFrames:
     @classmethod
     def from_descriptor(cls, descriptor: RobotDescriptor, odom_frame: str) -> Self:
         if not descriptor.frame:
-             raise ValueError(f"robot {descriptor.name!r} has no frame in its fleet descriptor")
+            raise ValueError(f"robot {descriptor.name!r} has no frame in its fleet descriptor")
         robot = FrameNamespace(descriptor.frame)
-        assert posixpath.basename(descriptor.frame) == descriptor.name, (
-            "robot frame is not <env>/<robot>; env frame cannot be derived by dirname"
-        )
+        assert posixpath.basename(descriptor.frame) == descriptor.name, "robot frame is not <env>/<robot>; env frame cannot be derived by dirname"
         return cls(
             env=str(FrameNamespace(posixpath.dirname(descriptor.frame))),
             robot=str(robot),
