@@ -34,7 +34,7 @@ def action_ranges(robot: MobileSpec) -> tuple[tuple[float, float], tuple[float, 
     """(linear, lateral, angular) policy command bounds from the robot's velocity_limits, lateral defaulting to linear."""
     limits = robot.velocity_limits
     if limits is None:
-        raise ValueError(f"{robot.path}: caps/mobile.yaml needs velocity_limits to bound the policy's commands")
+        raise ValueError(f"{robot.path}: caps.yaml mobile needs velocity_limits to bound the policy's commands")
     lateral = limits.lateral if limits.lateral is not None else limits.linear
     return (limits.linear.min, limits.linear.max), (lateral.min, lateral.max), (limits.angular.min, limits.angular.max)
 
@@ -303,7 +303,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
 
         laser = robot_desc.laser
         if laser is None:
-            raise ValueError(f"{robot_desc.path}: caps/mobile.yaml needs a laser to size the policy's scan observation")
+            raise ValueError(f"{robot_desc.path}: caps.yaml mobile needs a laser to size the policy's scan observation")
 
         # --- unified parameters from robot description + arena config ---
         # Start from whatever the user set in the YAML (preserves normalize,

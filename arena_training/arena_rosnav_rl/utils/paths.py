@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-import arena_robots.Robot
 from ament_index_python.packages import get_package_share_directory
 
 # Resolve path back through symlinks to the actual source tree so agent
@@ -20,7 +19,6 @@ __all__ = [
     "ConfigComponent",
     "TrainingCurriculum",
     "RewardFunction",
-    "RobotSetting",
     "PathFactory",
     "RosPackages",
 ]
@@ -123,18 +121,6 @@ class RewardFunction(ConfigComponent):
         return self._base / "reward_functions" / file_name
 
 
-class RobotSetting(PathComponent):
-    """Robot setting paths"""
-
-    def __init__(self, robot_model: str):
-        self.robot_model = robot_model
-
-    @cached_property
-    def path(self) -> Path:
-        robot = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync()
-        return robot.path / "model_params.yaml"
-
-
 class PathDictionary(dict[type[PathComponent], PathComponent]):
     def create_all(self):
         for path in self.values():
@@ -149,14 +135,12 @@ class PathFactory:
     @staticmethod
     def get_paths(
         agent_name: str,
-        robot_model: str,
         agents_dir: Path | None = None,
     ) -> PathDictionary:
         """Generate all required paths for the agent.
 
         Args:
             agent_name: Name of the agent.
-            robot_model: Robot identifier resolved through arena_robots.
             agents_dir: Custom base directory for agent artifacts.
                         If *None*, falls back to ``_ARENA_TRAINING_ROOT / "agents"``.
         """
@@ -165,7 +149,6 @@ class PathFactory:
                 Agent: Agent(agent_name, agents_dir=agents_dir),
                 AgentTensorboard: AgentTensorboard(agent_name, agents_dir=agents_dir),
                 AgentEval: AgentEval(agent_name, agents_dir=agents_dir),
-                RobotSetting: RobotSetting(robot_model),
                 ConfigComponent: ConfigComponent(),
             }
         )

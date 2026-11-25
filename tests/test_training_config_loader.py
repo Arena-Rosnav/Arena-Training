@@ -12,7 +12,8 @@ TRAINING_CONFIGS = sorted(CONFIGS.glob("*.yaml"))
 
 
 @pytest.mark.parametrize("config", TRAINING_CONFIGS, ids=lambda p: p.stem)
-def test_every_shipped_training_config_loads(config: pathlib.Path):
+def test_every_shipped_training_config_loads(config: pathlib.Path, require_installed, config_requirements):
+    require_installed(*config_requirements(config))
     load_training_config(str(config))
 
 

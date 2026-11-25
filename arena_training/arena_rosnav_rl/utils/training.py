@@ -102,7 +102,6 @@ def setup_paths_dictionary(trainer: ArenaTrainer, is_debug_mode: bool = False) -
     assert trainer.config.agent_config.name is not None
     trainer.paths = PathFactory.get_paths(
         trainer.config.agent_config.name,
-        trainer.config.arena_cfg.robot.robot_model,
         agents_dir=agents_dir,
     )
     if not is_debug_mode:
