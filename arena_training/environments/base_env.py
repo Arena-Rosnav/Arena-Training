@@ -8,7 +8,6 @@ import time
 from abc import ABC
 from typing import Any, cast
 
-import arena_robots.Robot
 import gymnasium
 import numpy as np
 import rclpy
@@ -31,7 +30,6 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
-    set_end_effector_frames,
     set_grasp_frames,
     set_object_pose_frames,
     set_pedestrians_topic,
