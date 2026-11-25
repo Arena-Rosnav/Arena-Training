@@ -56,6 +56,7 @@ from arena_training.arena_rosnav_rl.utils.envs import (
     set_laser_topic,
     stow_duration,
 )
+from arena_training.arena_rosnav_rl.utils.frames import RobotFrames
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
 _GRACE_STEPS = 3
@@ -249,7 +250,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._latest_fleet: RobotFleet | None = None
         self._fleet_event = threading.Event()
         self.robot_ns: Namespace | None = None
-        self.robot_source_frame: str | None = None
+        self.frames: RobotFrames | None = None
         # Set on first step(); reset() blocks here so we don't fire a fresh
         # task_generator reset until the model has cleared its first inference.
         self._ready_event = threading.Event()
@@ -333,9 +334,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._robot_name = robot.name
         if self._robot_cfg is None:
             self._robot_cfg = RobotCfg(robot_model=robot.model)
+
+        assert self._robot_cfg.view is not None
+
         self.robot_ns = Namespace(robot.ns)
-        base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
-        self.robot_source_frame = posixpath.join(robot.frame, base_frame)
+        self.frames = RobotFrames.from_descriptor(robot, odom_frame=self._robot_cfg.view.model_params.odom_frame)
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
@@ -423,22 +426,17 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         config = load_yaml(obs_config_path)
 
-        assert self.robot_source_frame is not None
+        assert self.frames is not None
         assert self.robot_ns is not None
-        set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
-
-        robot_stem = "/".join(self.robot_ns.name)
-        env_stem = "/".join(self.env_ns.name)
+        set_robot_pose_frames(config, *posixpath.split(self.frames.base))
 
         arms = self._arm_specs()
         grippers = self._gripper_specs()
-        if arms:
-            set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
 
         if grippers:
-            set_grasp_frames(config, posixpath.dirname(self.robot_source_frame))
+            set_grasp_frames(config, self.frames.robot)
 
-        set_object_pose_frames(config, env_stem, robot_stem)
+        set_object_pose_frames(config, self.frames.env, self.frames.robot)
 
         set_pedestrians_topic(config, self.robot_ns.to_string())
         assert self._robot_cfg is not None
