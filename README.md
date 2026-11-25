@@ -150,6 +150,19 @@ agent_cfg:       # rosnav_rl agent: framework, observation spaces, action space
 
 `arena_cfg.task.modes` maps a task axis to comma-separated mode names (`robots`, `obstacles`, `modules`). The curriculum queues the listed axes through `QueueEpisode.modes`, an axis left out keeps the env's selection, and the config validates each name against the task runtime's mode vocabulary. Curriculum stage keys named `task.<mode>.<leaf>` go through `QueueEpisode.params` under the param namespace the env's `QueryTaskModes.namespaces` reports for `<mode>`. The legacy keys `tm_robots`, `tm_obstacles` and `tm_modules` are still read and mapped onto `modes`.
 
+`arena_cfg.robot` selects the robot: `robot_model`, assembly `parts`, mount `frames` and `caps`, the per-instance cap overrides. A `caps` key is `<cap>.<path>` mapping to a value or an operation (`{scale: a, offset: b}`, `{append: [...]}`, `{delete: true}`), the grammar of the [setup README](../arena_robots/arena_robots/config/setup/README.md#cap-overrides), and a part's own overrides go in its `caps` entry (paths within its cap instance). The action space, laser geometry and radius follow the overridden `mobile` cap (`mobile.limits` bounds the action space through the clamped `velocity_limits`), and the envs launch with the same instance through `robot:=<model>[...]`.
+
+```yaml
+arena_cfg:
+  robot:
+    robot_model: jackal
+    parts:
+      arm: [{variant: fr3, mount: top, caps: {stall_time: 2.0}}]
+    caps:
+      mobile.velocity_limits.linear: [-0.5, 1.0]
+      mobile.radius: {scale: 1.2}
+```
+
 ## Troubleshooting
 
 **`rosnav_rl` not found**

@@ -14,7 +14,7 @@ class RobotFrames:
     odom: str
 
     @classmethod
-    def from_descriptor(cls, descriptor: RobotDescriptor, odom_frame: str) -> Self:
+    def from_descriptor(cls, descriptor: RobotDescriptor) -> Self:
         if not descriptor.frame:
             raise ValueError(f"robot {descriptor.name!r} has no frame in its fleet descriptor")
         robot = FrameNamespace(descriptor.frame)
@@ -23,5 +23,5 @@ class RobotFrames:
             env=str(FrameNamespace(posixpath.dirname(descriptor.frame))),
             robot=str(robot),
             base=descriptor.base_frame,
-            odom=str(robot(odom_frame)),
+            odom=str(robot("odom")),
         )

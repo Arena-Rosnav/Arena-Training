@@ -336,7 +336,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         assert self._robot_cfg.view is not None
 
         self.robot_ns = Namespace(robot.ns)
-        self.frames = RobotFrames.from_descriptor(robot, odom_frame=self._robot_cfg.view.model_params.odom_frame)
+        self.frames = RobotFrames.from_descriptor(robot)
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
