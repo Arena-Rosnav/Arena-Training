@@ -202,7 +202,7 @@ datasources:
     params: {}
 
   grasp_dist_angle:
-    type: GraspAlignmentGenerator
+    type: GraspDistanceAngleGenerator
     params:
       direction_epsilon: 0.05
   

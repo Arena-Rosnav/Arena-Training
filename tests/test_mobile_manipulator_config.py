@@ -12,8 +12,8 @@ from rclpy.node import Node
 from rosnav_rl.cfg.action_spaces import CompositeActionSpace, DiscretizationCfg, ManipulatorActionSpace, GripperActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations.data_sources.collectors import ImageColorCollector, JointStateCollector
-from rosnav_rl.observations.data_sources.generators import EndEffectorPoseTFGenerator
-from rosnav_rl.observations.factory.factory import ObservationFactory, set_end_effector_frames, set_robot_pose_frames
+from rosnav_rl.observations.data_sources.generators import ObjectPoseTFGenerator
+from rosnav_rl.observations.factory.factory import ObservationFactory, set_object_pose_frames, set_robot_pose_frames
 
 from arena_training.arena_rosnav_rl.trainer.arena_trainer import ArenaTrainer
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
@@ -86,11 +86,11 @@ def test_discrete_drive_actions_cannot_drive_an_arm():
 def test_the_manipulator_observations_build_the_arm_datasources(node):
     config = loads_yaml((CONFIGS / "observations" / "manipulator.yaml").read_text())
     set_robot_pose_frames(config, "env_0/rbkairos", "base_link")
-    set_end_effector_frames(config, "env_0/rbkairos", "robot_arm_tool0")
+    set_object_pose_frames(config, env_frame="env_0", robot_frame="env_0/rbkairos")
 
     sources = ObservationFactory().create_data_sources(config, node=node, simulation_state_container=AgentParameters())
 
-    assert isinstance(sources["end_effector_pose"], EndEffectorPoseTFGenerator)
+    assert isinstance(sources["end_effector_pose"], ObjectPoseTFGenerator)
     assert isinstance(sources["joint_states"], JointStateCollector)
     assert isinstance(sources["wrist_color"], ImageColorCollector)
-    assert {"arm_goal_in_ee_frame", "arm_dist_angle_to_goal"} <= sources.keys()
+    assert {"grasp_dist_angle"} <= sources.keys()
