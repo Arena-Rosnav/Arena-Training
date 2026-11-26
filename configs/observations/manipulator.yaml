@@ -171,45 +171,6 @@ datasources:
       timeout: 0.2
       up_to_date_required: false
   
-  grasp_state:
-    type: GraspStateGenerator
-    params:
-      left_frame: "robot_gripper_robotiq_85_left_finger_tip_link"
-      right_frame: "robot_gripper_robotiq_85_right_finger_tip_link"
-      inside_tolerance: 0.0
-      min_normal_alignment: 0.5
-
-  left_finger_tip_pose:
-    type: ObjectPoseTFGenerator
-    scope: robot
-    params:
-      source_frame: robot_gripper_robotiq_85_left_finger_tip_link
-
-  right_finger_tip_pose:
-    type: ObjectPoseTFGenerator
-    scope: robot
-    params:
-      source_frame: robot_gripper_robotiq_85_right_finger_tip_link
-
-  end_effector_pose_from_tf:
-    type: ObjectPoseTFGenerator
-    scope: robot
-    params: 
-      source_frame: robot_arm_tool0
-
-  grasp_point:
-    type: GraspPointGnerator
-    params: {}
-
-  grasp_dist_angle:
-    type: GraspDistanceAngleGenerator
-    params:
-      direction_epsilon: 0.05
-  
-  target_pose:
-    type: ObjectPoseTFGenerator
-    params:
-      source_frame: target_cube
 
   # ---------------------------------------------------------------------------
   # OPTIONAL COLLECTORS: Additional sensors for advanced configurations
@@ -253,15 +214,10 @@ datasources:
   subgoal_in_robot_frame:
     type: SubgoalLocationInRobotFrameGenerator  # Transforms subgoal from world → robot frame
 
-  arm_goal_in_ee_frame:
-    type: ArmGoalLocationInEndEffectorFrameGenerator
-
   # Navigation metrics - distance and angle computations
   dist_angle_to_goal:
     type: DistAngleToGoalGenerator           # Computes [distance, angle] to goal
 
-  arm_dist_angle_to_goal:
-    type: ArmDistAngleToGoalGenerator
 
   dist_angle_to_subgoal:
     type: DistAngleToSubgoalGenerator        # Computes [distance, angle] to subgoal
@@ -269,6 +225,50 @@ datasources:
   # Safety and collision detection
   laser_safety_violation:
     type: LaserSafeDistanceGenerator         # Checks if obstacles are within safety distance
+
+  
+  # Manipulation
+  grasp_dist_angle:
+    type: GraspDistanceAngleGenerator
+    params:
+      direction_epsilon: 0.05
+
+  # Gripper
+  grasp_state:
+    type: GraspStateGenerator
+    params:
+      left_frame: "robot_gripper_robotiq_85_left_finger_tip_link"
+      right_frame: "robot_gripper_robotiq_85_right_finger_tip_link"
+      inside_tolerance: 0.0
+      min_normal_alignment: 0.5
+  
+  # Poses
+  target_pose:
+    type: ObjectPoseTFGenerator
+    params:
+      source_frame: target_cube
+
+  end_effector_pose_from_tf:
+    type: ObjectPoseTFGenerator
+    scope: robot
+    params: 
+      source_frame: robot_arm_tool0
+
+  left_finger_tip_pose:
+    type: ObjectPoseTFGenerator
+    scope: robot
+    params:
+      source_frame: robot_gripper_robotiq_85_left_finger_tip_link
+
+  right_finger_tip_pose:
+    type: ObjectPoseTFGenerator
+    scope: robot
+    params:
+      source_frame: robot_gripper_robotiq_85_right_finger_tip_link
+  
+  grasp_point:
+    type: GraspPointGnerator
+    params: {}
 
   # ---------------------------------------------------------------------------
   # PEDESTRIAN ANALYSIS GENERATORS - Social navigation features
