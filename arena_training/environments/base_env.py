@@ -30,7 +30,8 @@ from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
     create_observation_manager_from_config,
-    set_end_effector_frames,
+    set_grasp_frames,
+    set_object_pose_frames,
     set_pedestrians_topic,
     set_robot_pose_frames,
 )
@@ -53,6 +54,7 @@ from arena_training.arena_rosnav_rl.utils.envs import (
     set_laser_topic,
     stow_duration,
 )
+from arena_training.arena_rosnav_rl.utils.frames import RobotFrames
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
 _GRACE_STEPS = 3
@@ -246,7 +248,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._latest_fleet: RobotFleet | None = None
         self._fleet_event = threading.Event()
         self.robot_ns: Namespace | None = None
-        self.robot_source_frame: str | None = None
+        self.frames: RobotFrames | None = None
         # Set on first step(); reset() blocks here so we don't fire a fresh
         # task_generator reset until the model has cleared its first inference.
         self._ready_event = threading.Event()
@@ -330,11 +332,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._robot_name = robot.name
         if self._robot_cfg is None:
             self._robot_cfg = RobotCfg(robot_model=robot.model)
+
+        assert self._robot_cfg.view is not None
+
         self.robot_ns = Namespace(robot.ns)
-        assert self._robot_cfg.effective_caps is not None
-        body = self._robot_cfg.effective_caps.body
-        assert body is not None
-        self.robot_source_frame = posixpath.join(robot.frame, body.base_frame)
+        self.frames = RobotFrames.from_descriptor(robot)
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""
@@ -422,12 +424,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
         config = load_yaml(obs_config_path)
 
-        assert self.robot_source_frame is not None
+        assert self.frames is not None
         assert self.robot_ns is not None
-        set_robot_pose_frames(config, *posixpath.split(self.robot_source_frame))
+        set_robot_pose_frames(config, *posixpath.split(self.frames.base))
+
         arms = self._arm_specs()
-        if arms:
-            set_end_effector_frames(config, posixpath.dirname(self.robot_source_frame), arms[0].tip_link)
+        grippers = self._gripper_specs()
+
+        if grippers:
+            set_grasp_frames(config, self.frames.robot)
+
+        set_object_pose_frames(config, self.frames.env, self.frames.robot)
+
         set_pedestrians_topic(config, self.robot_ns.to_string())
         assert self._robot_cfg is not None
         set_laser_topic(config, self._robot_cfg.laser_topic)
