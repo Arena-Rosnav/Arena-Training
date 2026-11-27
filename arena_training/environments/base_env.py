@@ -8,7 +8,6 @@ import time
 from abc import ABC
 from typing import Any, cast
 
-import arena_robots.Robot
 import gymnasium
 import numpy as np
 import rclpy
@@ -335,8 +334,10 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         if self._robot_cfg is None:
             self._robot_cfg = RobotCfg(robot_model=robot.model)
         self.robot_ns = Namespace(robot.ns)
-        base_frame = arena_robots.Robot.RobotIdentifier(robot.model).resolve_sync().model_params.base_frame
-        self.robot_source_frame = posixpath.join(robot.frame, base_frame)
+        assert self._robot_cfg.effective_caps is not None
+        body = self._robot_cfg.effective_caps.body
+        assert body is not None
+        self.robot_source_frame = posixpath.join(robot.frame, body.base_frame)
 
     def _setup_ros_services(self):
         """Creates ROS2 services and clients required for training."""

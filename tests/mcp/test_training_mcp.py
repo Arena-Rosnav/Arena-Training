@@ -28,9 +28,9 @@ def _first_with_relative_observations() -> Path:
     pytest.skip("no shipped config with a relative observations_config")
 
 
-def test_configs_lists_every_shipped_config_with_its_loaded_fields():
+def test_configs_lists_every_shipped_config_with_its_loaded_fields(installed_configs):
     listed = training_configs()
-    assert [entry["name"] for entry in listed] == sorted(path.name for path in CONFIGS.glob("*.yaml"))
+    assert [entry["name"] for entry in listed] == sorted(path.name for path in installed_configs)
     for entry in listed:
         assert entry["valid"], entry
         loaded = load_training_config(entry["path"])
@@ -51,10 +51,10 @@ def test_config_returns_the_parsed_model_and_its_schema():
     assert "schema" not in training_config("sb_training_config.yaml", schema=False)
 
 
-def test_config_serializes_robot_parts_of_a_manipulator_config():
-    parted = [path for path in sorted(CONFIGS.glob("*.yaml")) if load_training_config(str(path)).arena_cfg.robot.parts]
+def test_config_serializes_robot_parts_of_a_manipulator_config(installed_configs):
+    parted = [path for path in installed_configs if load_training_config(str(path)).arena_cfg.robot.parts]
     if not parted:
-        pytest.skip("no shipped config requests robot parts")
+        pytest.skip("no installed shipped config requests robot parts")
     attrs = pytest.importorskip("attrs")
     loaded = load_training_config(str(parted[0])).arena_cfg.robot.parts
     out = training_config(parted[0].name, schema=False)["config"]["arena_cfg"]["robot"]["parts"]
@@ -239,7 +239,7 @@ def test_start_refuses_while_a_runtime_serves_register_env():
     assert "jobs_cancel" in out["hint"]
 
 
-def test_domain_serves_every_tool_through_the_server():
+def test_domain_serves_every_tool_through_the_server(installed_configs):
     from mcp.server.mcpserver import MCPServer
 
     from arena_training.mcp import domain
@@ -257,5 +257,5 @@ def test_domain_serves_every_tool_through_the_server():
     tools, listed, schema = asyncio.run(scenario())
     assert sorted(tool.name for tool in tools) == sorted(spec.name for spec in domain.tools)
     assert not listed.is_error
-    assert [entry["name"] for entry in json.loads(listed.content[0].text)] == sorted(path.name for path in CONFIGS.glob("*.yaml"))
+    assert [entry["name"] for entry in json.loads(listed.content[0].text)] == sorted(path.name for path in installed_configs)
     assert "arena_cfg" in json.loads(schema[0].content)["properties"]

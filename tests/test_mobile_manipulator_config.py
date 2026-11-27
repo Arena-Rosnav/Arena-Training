@@ -19,6 +19,7 @@ from arena_training.arena_rosnav_rl.trainer.arena_trainer import ArenaTrainer
 from arena_training.arena_rosnav_rl.utils.config import load_training_config
 
 CONFIGS = pathlib.Path(__file__).parents[1] / "configs"
+MANIPULATOR = pytest.mark.requires_installed("rbkairos", "arm/ur", "gripper/robotiq_2f_85", "camera/d435_color", "lidar/sick_s300")
 
 
 def _action_space(config_name: str, **agent_update: object) -> object:
@@ -37,6 +38,7 @@ def node():
     node.destroy_node()
 
 
+@MANIPULATOR
 def test_manipulator_config_contains_components():
     space = _action_space("sb_mobile_manipulator_config.yaml")
     assert isinstance(space, CompositeActionSpace)
@@ -46,6 +48,7 @@ def test_manipulator_config_contains_components():
     assert any(isinstance(component, GripperActionSpace) for component in space.action_spaces)
 
 
+@MANIPULATOR
 def test_manipulator_config_drives_the_base():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
@@ -53,6 +56,7 @@ def test_manipulator_config_drives_the_base():
     assert space.num_dof == base.num_dof + 7
 
 
+@MANIPULATOR
 def test_manipulator_config_drives_the_arm():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
@@ -61,6 +65,7 @@ def test_manipulator_config_drives_the_arm():
     assert arm.stow_positions is not None
 
 
+@MANIPULATOR
 def test_manipulator_config_drives_the_gripper():
     space = _action_space("sb_mobile_manipulator_config.yaml")
 
@@ -72,6 +77,7 @@ def test_a_robot_without_an_arm_keeps_its_drive_space():
     assert not isinstance(_action_space("sb_training_config.yaml"), CompositeActionSpace)
 
 
+@MANIPULATOR
 def test_discrete_drive_actions_cannot_drive_an_arm():
     with pytest.raises(ValueError, match="continuous sub-spaces only"):
         _action_space("sb_mobile_manipulator_config.yaml", discretization=DiscretizationCfg(strategy="navigational"))
