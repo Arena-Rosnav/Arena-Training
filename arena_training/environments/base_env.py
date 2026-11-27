@@ -51,6 +51,7 @@ from arena_training.arena_rosnav_rl.utils.envs import (
     get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
+    joint_target_from_velocity,
     set_laser_topic,
     stow_duration,
 )
@@ -526,24 +527,18 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             return
         for arm in self._arm_specs():
             try:
-                self._measured_positions[arm.controller] = np.asarray(
-                    [float(joint_states[n]["position"]) for n in arm.joint_names], dtype=np.float32
-                )
+                self._measured_positions[arm.controller] = np.asarray([float(joint_states[n]["position"]) for n in arm.joint_names], dtype=np.float32)
             except (KeyError, TypeError):
                 continue
 
-    def _get_target_positions(self, spec: ManipulatorActionSpace, decoded: np.ndarray, dt: float) -> np.ndarray:
+    def _publish_arm_action(self, spec: ManipulatorActionSpace, velocity: np.ndarray, dt: float):
         measured = self._measured_positions.get(spec.controller)
-        if measured is None or measured.shape != (spec.num_dof,) or dt <= 0.0:
-            return self._last_arm_targets.get(
-                spec.controller,
-                np.asarray(spec.stow_positions if spec.stow_positions else decoded, dtype=np.float32),
-            )
-        lo = np.array([lo for lo, _ in spec.position_limits], dtype=np.float32)
-        hi = np.array([hi for _, hi in spec.position_limits], dtype=np.float32)
-        target = np.clip(measured + np.asarray(decoded, dtype=np.float32) * dt, lo, hi)
+        last_targets = self._last_arm_targets.get(spec.controller)
+        target = joint_target_from_velocity(spec, velocity, measured, last_targets, dt)
+        if target is None:
+            return
         self._last_arm_targets[spec.controller] = target
-        return target
+        self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(target, spec.joint_names, dt))
 
     @flush_errors_decorator
     def step(self, action: np.ndarray) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
@@ -579,8 +574,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         dt = self._get_dt() if self._joint_trajectory_pubs else 0.0
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
-                target = self._get_target_positions(spec, decoded, dt)
-                self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(target, spec.joint_names, dt))
+                self._publish_arm_action(spec, decoded, dt)
             elif isinstance(spec, GripperActionSpace):
                 client = self._gripper_action_clients[spec.controller]
                 if client.server_is_ready():

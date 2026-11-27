@@ -37,7 +37,13 @@ def test_a_configured_forward_only_action_space_replaces_the_rated_limits():
 
 
 def test_a_configured_arm_action_space_is_rejected():
-    arm = ManipulatorActionSpace(joint_names=["shoulder"], position_limits=[(-1.0, 1.0)], controller="arm_controller", tip_link="tool")
+    arm = ManipulatorActionSpace(
+        joint_names=["shoulder"],
+        position_limits=[(-1.0, 1.0)],
+        velocity_limits=[0.5],
+        controller="arm_controller",
+        tip_link="tool",
+    )
     with pytest.raises(ValueError, match="differential_drive or omnidirectional"):
         mobile_action_space(RobotCfg(robot_model="jackal").robot_description, arm)
 

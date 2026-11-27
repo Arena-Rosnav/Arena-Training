@@ -4,6 +4,7 @@ from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
 from rosnav_rl.observations import DONE_REASONS
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from rosnav_rl.cfg.action_spaces import ManipulatorActionSpace
 
 
 def determine_termination(
@@ -72,6 +73,23 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: list[str],
     trajectory.joint_names = joint_names
     trajectory.points = [point]
     return trajectory
+
+
+def joint_target_from_velocity(spec: ManipulatorActionSpace, velocity: np.ndarray, measured: np.ndarray | None, last_target: np.ndarray | None, dt: float) -> np.ndarray | None:
+    """Translate velocity manipultator action into absolute position target."""
+    if dt <= 0.0:
+        return None
+
+    if measured is not None and measured.shape == (spec.num_dof,):
+        lo = np.array([lo for lo, _ in spec.position_limits], dtype=np.float32)
+        hi = np.array([hi for _, hi in spec.position_limits], dtype=np.float32)
+        return np.clip(measured + np.asarray(velocity, dtype=np.float32) * dt, lo, hi)
+
+    if last_target is not None and last_target.shape == (spec.num_dof,):
+        return last_target
+    if spec.stow_positions is not None:
+        return np.asarray(spec.stow_positions, dtype=np.float32)
+    return None
 
 
 def get_gripper_command(position: float, max_effort: float) -> GripperCommand.Goal:
