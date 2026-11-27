@@ -50,6 +50,7 @@ from arena_training.arena_rosnav_rl.utils.envs import (
     get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
+    joint_target_from_velocity,
     set_laser_topic,
     stow_duration,
 )
@@ -221,6 +222,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._default_dt = 0.0999
         self._traj_min_dt: float = 1e-3
         self._traj_max_dt: float = 0.5
+        self._measured_positions: dict[str, np.ndarray] = {}
+        self._last_arm_targets: dict[str, np.ndarray] = {}
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
         self.__wait_for_obs = wait_for_obs
@@ -519,6 +522,25 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._last_step_time = now
         return dt
 
+    def _cache_arm_state(self, obs_dict: dict[str, Any]) -> None:
+        joint_states = obs_dict.get("joint_states")
+        if not isinstance(joint_states, dict):
+            return
+        for arm in self._arm_specs():
+            try:
+                self._measured_positions[arm.controller] = np.asarray([float(joint_states[n]["position"]) for n in arm.joint_names], dtype=np.float32)
+            except (KeyError, TypeError):
+                continue
+
+    def _publish_arm_action(self, spec: ManipulatorActionSpace, velocity: np.ndarray, dt: float):
+        measured = self._measured_positions.get(spec.controller)
+        last_targets = self._last_arm_targets.get(spec.controller)
+        target = joint_target_from_velocity(spec, velocity, measured, last_targets, dt)
+        if target is None:
+            return
+        self._last_arm_targets[spec.controller] = target
+        self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(target, spec.joint_names, dt))
+
     @flush_errors_decorator
     def step(self, action: np.ndarray) -> tuple[EncodedObservationDict, float, bool, bool, InformationDict]:
         """
@@ -553,7 +575,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         dt = self._get_dt() if self._joint_trajectory_pubs else 0.0
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
-                self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
+                self._publish_arm_action(spec, decoded, dt)
             elif isinstance(spec, GripperActionSpace):
                 client = self._gripper_action_clients[spec.controller]
                 if client.server_is_ready():
@@ -621,6 +643,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             # robot model in Gazebo, re-initialising the GPU lidar sensor.
             self.node.get_logger().fatal(f"[{self.env_ns.to_string()}] {exc}  Exiting worker to force respawn.")
             os._exit(1)
+
+        self._cache_arm_state(obs_dict)
 
         reward, reward_info = self._reward_function.get_reward(
             obs_dict=obs_dict,
@@ -750,6 +774,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             # Get the initial observation after reset.
             obs_dict = self.observation_collector.get_observations(is_terminal=False, is_first=True)
             obs_dict["is_first"] = True  # Indicate it's the first observation
+
+            self._cache_arm_state(obs_dict)
 
         finally:
             pass

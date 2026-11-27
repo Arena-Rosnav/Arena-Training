@@ -29,8 +29,15 @@ def test_every_shipped_training_config_loads(config: pathlib.Path, require_insta
             {"linear_range_x": (0.0, 0.5), "linear_range_y": (-0.5, 0.5), "angular_range": (-1.5, 1.5)},
         ),
         (
-            {"type": "arm", "joint_names": ["shoulder"], "position_limits": [[-1.0, 1.0]], "controller": "arm_controller", "tip_link": "tool"},
-            {"position_limits": [(-1.0, 1.0)]},
+            {
+                "type": "arm",
+                "joint_names": ["shoulder"],
+                "position_limits": [[-1.0, 1.0]],
+                "velocity_limits": [0.5],
+                "controller": "arm_controller",
+                "tip_link": "tool",
+            },
+            {"position_limits": [(-1.0, 1.0)], "velocity_limits": [0.5]},
         ),
     ],
 )
