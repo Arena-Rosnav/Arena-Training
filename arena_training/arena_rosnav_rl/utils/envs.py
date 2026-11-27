@@ -2,9 +2,9 @@ import numpy as np
 from builtin_interfaces.msg import Duration
 from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
+from rosnav_rl.cfg.action_spaces import ManipulatorActionSpace
 from rosnav_rl.observations import DONE_REASONS
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from rosnav_rl.cfg.action_spaces import ManipulatorActionSpace
 
 
 def determine_termination(
