@@ -89,8 +89,10 @@ def installed_configs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, config_re
             kept.append(entry)
         (configs / entry.name).symlink_to(entry)
 
-    def share(package: str) -> str:
-        return str(tmp_path) if package == "arena_training" else get_package_share_directory(package)
+    def share(package: str, print_warning: bool = True) -> str:
+        if package == "arena_training":
+            return str(tmp_path)
+        return get_package_share_directory(package, print_warning=print_warning)
 
     monkeypatch.setattr("arena_training.arena_rosnav_rl.utils.paths.get_package_share_directory", share)
     monkeypatch.setattr("ament_index_python.packages.get_package_share_directory", share)
